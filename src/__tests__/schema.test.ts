@@ -19,6 +19,13 @@ describe('Schema & Seed Dataset', () => {
     expect(moviesTable?.columns.find((c) => c.name === 'movie_id')?.isPrimaryKey).toBe(true);
   });
 
+  it('should safely re-seed when the built-in tables already exist', async () => {
+    await expect(seedMoviesDataset()).resolves.toBeUndefined();
+
+    const schema = await getIntrospectedSchema();
+    expect(schema.tables.find((table) => table.name === 'movies')?.rowCount).toBe(5);
+  });
+
   it('should introspect foreign keys and relations correctly', async () => {
     const schema = await getIntrospectedSchema();
     const moviesTable = schema.tables.find((t) => t.name === 'movies');

@@ -676,7 +676,22 @@ export function parseDuckDbExplain(explainText: string): ExplainNode | undefined
   return nodeMap.get(rootBox.id);
 }
 
+export function isCreateTableStatement(sql: string): boolean {
+  return /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\b/i.test(sql);
+}
+
 export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> {
+  if (isCreateTableStatement(sql)) {
+    await executeQuery(sql);
+    return {
+      query: sql,
+      stages: [],
+      events: [],
+      finalResult: [],
+      columns: [],
+    };
+  }
+
   const ast = parseQueryAST(sql);
   const astObj: any = Array.isArray(ast) ? ast[0] : ast;
 

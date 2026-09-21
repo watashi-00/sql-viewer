@@ -192,6 +192,29 @@ LIMIT 5;`,
     expect(state.debugState).toBe('paused');
   });
 
+  it('should refresh the schema after a CREATE TABLE command succeeds', async () => {
+    const mockPlan: ExecutionPlan = {
+      query: 'CREATE TABLE clients (id INTEGER)',
+      stages: [],
+      events: [],
+      finalResult: [],
+      columns: [],
+    };
+    const mockSchema: Schema = { name: 'main', tables: [] };
+    const recordSpy = vi.spyOn(recorderModule, 'recordQueryExecution').mockResolvedValue(mockPlan);
+    const seedSpy = vi.spyOn(schemaModule, 'seedMoviesDataset').mockResolvedValue(undefined);
+    const schemaSpy = vi.spyOn(schemaModule, 'getIntrospectedSchema').mockResolvedValue(mockSchema);
+
+    useWorkspaceStore.getState().setSql(mockPlan.query);
+    await useWorkspaceStore.getState().runQuery();
+
+    expect(recordSpy).toHaveBeenCalledWith(mockPlan.query);
+    expect(seedSpy).toHaveBeenCalledOnce();
+    expect(schemaSpy).toHaveBeenCalledOnce();
+    expect(useWorkspaceStore.getState().schema).toEqual(mockSchema);
+    expect(useWorkspaceStore.getState().debugState).toBe('paused');
+  });
+
   it('should set debugState to error when recordQueryExecution fails in runQuery', async () => {
     vi.spyOn(recorderModule, 'recordQueryExecution').mockRejectedValue(new Error('Syntax error'));
 
