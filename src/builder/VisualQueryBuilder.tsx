@@ -277,7 +277,7 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
   return (
     <div className="flex flex-col h-full w-full bg-[#0B0D10] text-gray-200 overflow-y-auto p-4 space-y-4">
       {/* Header & Controls Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-[#111418] border border-gray-800 rounded-lg shadow-sm">
+      <div className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center justify-between gap-3 p-3 bg-[#111418] border border-gray-800 rounded-lg shadow-sm">
         <div className="flex items-center space-x-2">
           <Database className="w-5 h-5 text-[#7C9CFF]" />
           <h2 className="text-sm font-semibold tracking-wider text-gray-100 uppercase">
@@ -359,7 +359,7 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
       </div>
 
       {/* Canvas Area: Table Cards */}
-      <div className="flex-1 min-h-[160px] p-4 bg-[#111418] border border-gray-800 rounded-lg">
+      <div className="flex-none min-h-[160px] p-4 bg-[#111418] border border-gray-800 rounded-lg">
         {queryState.nodes.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-gray-500 text-sm space-y-2">
             <TableIcon className="w-8 h-8 opacity-40" />
@@ -376,7 +376,7 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
               return (
                 <div
                   key={node.id}
-                  className="w-64 bg-[#181C22] border border-gray-700 rounded-md shadow-md flex flex-col overflow-hidden"
+                  className="w-full max-w-full sm:w-64 bg-[#181C22] border border-gray-700 rounded-md shadow-md flex flex-col overflow-hidden"
                 >
                   {/* Card Header */}
                   <div className="flex items-center justify-between px-3 py-2 bg-[#20252D] border-b border-gray-700">

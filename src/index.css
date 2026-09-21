@@ -2,10 +2,130 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+  --color-base: 11 13 16;
+  --color-surface: 17 20 24;
+  --color-surface-secondary: 22 26 32;
+  --color-border: 39 44 51;
+  --color-primary: 230 232 235;
+  --color-secondary: 146 153 163;
+  --color-muted: 98 106 117;
+  --color-accent: 124 156 255;
+  --color-success: 98 197 138;
+  --color-warning: 217 164 65;
+  --color-error: 224 108 117;
+  --color-info: 110 168 254;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --color-base: 244 247 250;
+  --color-surface: 255 255 255;
+  --color-surface-secondary: 235 240 245;
+  --color-border: 205 214 222;
+  --color-primary: 24 33 42;
+  --color-secondary: 72 88 102;
+  --color-muted: 112 128 140;
+  --color-accent: 24 108 116;
+  --color-success: 26 125 76;
+  --color-warning: 171 105 0;
+  --color-error: 180 46 58;
+  --color-info: 37 99 235;
+}
+
+[data-theme='noir'] {
+  color-scheme: dark;
+  --color-base: 5 6 8;
+  --color-surface: 12 14 18;
+  --color-surface-secondary: 19 22 27;
+  --color-border: 37 40 46;
+  --color-primary: 238 240 242;
+  --color-secondary: 158 164 174;
+  --color-muted: 94 101 112;
+  --color-accent: 225 184 92;
+  --color-success: 108 194 140;
+  --color-warning: 232 168 73;
+  --color-error: 230 112 120;
+  --color-info: 133 174 255;
+}
+
+[data-theme='ocean'] {
+  color-scheme: dark;
+  --color-base: 7 17 29;
+  --color-surface: 10 26 44;
+  --color-surface-secondary: 14 38 62;
+  --color-border: 29 69 100;
+  --color-primary: 225 240 255;
+  --color-secondary: 145 187 217;
+  --color-muted: 91 132 165;
+  --color-accent: 75 176 230;
+  --color-success: 91 205 157;
+  --color-warning: 232 181 82;
+  --color-error: 239 121 137;
+  --color-info: 113 191 255;
+}
+
+/* Keep the older builder utility classes aligned with the active palette. */
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='bg-[#0B0D10]'] {
+  background-color: rgb(var(--color-base)) !important;
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='bg-[#111418]'] {
+  background-color: rgb(var(--color-surface)) !important;
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='bg-[#181C22]'],
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='bg-[#20252D]'],
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='bg-[#15191F]'] {
+  background-color: rgb(var(--color-surface-secondary)) !important;
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='text-[#7C9CFF]'] {
+  color: rgb(var(--color-accent)) !important;
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='bg-[#7C9CFF]'] {
+  background-color: rgb(var(--color-accent));
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='text-gray-100'],
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='text-gray-200'],
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='text-gray-300'] {
+  color: rgb(var(--color-primary)) !important;
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='text-gray-400'] {
+  color: rgb(var(--color-secondary)) !important;
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='text-gray-500'] {
+  color: rgb(var(--color-muted)) !important;
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='bg-gray-800'],
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='bg-gray-900'] {
+  background-color: rgb(var(--color-surface-secondary)) !important;
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='border-gray-600'],
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='border-gray-700'],
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='border-gray-800'] {
+  border-color: rgb(var(--color-border)) !important;
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='hover:bg-gray-800']:hover {
+  background-color: rgb(var(--color-surface-secondary)) !important;
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='hover:text-red-400']:hover {
+  color: rgb(var(--color-error)) !important;
+}
+
 body {
   margin: 0;
-  background-color: #0B0D10;
-  color: #E6E8EB;
+  background-color: rgb(var(--color-base));
+  color: rgb(var(--color-primary));
   font-family: 'Inter', system-ui, sans-serif;
   overflow: hidden;
 }

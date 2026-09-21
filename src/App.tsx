@@ -4,12 +4,18 @@ import { SqlEditor } from './editor/SqlEditor';
 import { VisualQueryBuilder } from './builder/VisualQueryBuilder';
 import { ExecutionVisualizer } from './visualizer/ExecutionVisualizer';
 import { ResultGrid } from './inspector/ResultGrid';
-import { Play, RotateCcw, Layers } from 'lucide-react';
+import { Play, RotateCcw, Layers, Palette } from 'lucide-react';
 import { useWorkspaceStore } from './state/useWorkspaceStore';
+import { applyTheme, getInitialTheme, AppTheme } from './theme';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'editor' | 'builder'>('editor');
+  const [theme, setTheme] = useState<AppTheme>(getInitialTheme);
   const { schema, setSql, runQuery, restartDebug } = useWorkspaceStore();
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -33,6 +39,20 @@ export const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-secondary" title="Color theme">
+            <Palette size={13} />
+            <select
+              aria-label="Color theme"
+              value={theme}
+              onChange={(event) => setTheme(event.target.value as AppTheme)}
+              className="bg-transparent text-[11px] text-secondary focus:outline-none cursor-pointer"
+            >
+              <option value="midnight">Midnight</option>
+              <option value="light">Light</option>
+              <option value="noir">Noir</option>
+              <option value="ocean">Ocean</option>
+            </select>
+          </label>
           <button
             onClick={restartDebug}
             className="flex items-center gap-1 px-2.5 py-1 rounded bg-surface-secondary border border-border text-secondary hover:text-primary"
@@ -89,7 +109,7 @@ export const App: React.FC = () => {
           <div className="h-1/2 flex border-b border-border">
             <div className="w-1/2 h-full overflow-hidden">
               {activeTab === 'editor' ? (
-                <SqlEditor />
+                <SqlEditor theme={theme} />
               ) : (
                 <VisualQueryBuilder
                   schema={schema || { name: 'main', tables: [] }}
