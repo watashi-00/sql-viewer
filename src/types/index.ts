@@ -78,6 +78,33 @@ export interface GroupBucket {
   havingPredicate?: string;
 }
 
+export interface SubqueryResolution {
+  id: string;
+  type: 'scalar' | 'set' | 'exists';
+  rawQuery: string;
+  resolvedValue?: RowValue;
+  resolvedSet?: RowValue[];
+  existsResult?: boolean;
+  parentClause: 'WHERE' | 'HAVING' | 'SELECT';
+}
+
+export interface CteScope {
+  id: string;
+  aliasName: string;
+  query: string;
+  events: ExecutionEvent[];
+  outputRows: DataRow[];
+}
+
+export interface ExplainNode {
+  id: string;
+  operatorType: string;
+  description: string;
+  timingMs?: number;
+  cardinality?: number;
+  children: ExplainNode[];
+}
+
 export interface ExecutionEvent {
   id: string;
   stage: OperationType;
@@ -94,6 +121,7 @@ export interface ExecutionEvent {
   groupBuckets?: GroupBucket[];
   rejectedGroupBuckets?: GroupBucket[];
   distinctDuplicatesRemoved?: number;
+  subqueryResolutions?: SubqueryResolution[];
   durationMs?: number;
 }
 
@@ -103,4 +131,7 @@ export interface ExecutionPlan {
   events: ExecutionEvent[];
   finalResult: DataRow[];
   columns: string[];
+  cteScopes?: CteScope[];
+  explainTree?: ExplainNode;
 }
+

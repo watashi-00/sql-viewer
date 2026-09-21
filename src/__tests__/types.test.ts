@@ -13,6 +13,9 @@ import {
   GroupAggregateCalc,
   ExecutionEvent,
   ExecutionPlan,
+  SubqueryResolution,
+  CteScope,
+  ExplainNode,
 } from '../types';
 
 describe('Types sanity check', () => {
@@ -220,4 +223,49 @@ describe('Phase 2 Types', () => {
     expect(event.groupBuckets![0].aggregates[0].funcName).toBe('AVG');
   });
 });
+
+describe('Phase 3 Types', () => {
+  it('should instantiate CteScope, SubqueryResolution, and ExplainNode interfaces', () => {
+    const subquery: SubqueryResolution = {
+      id: 'sub-1',
+      type: 'scalar',
+      rawQuery: 'SELECT AVG(score) FROM reviews',
+      resolvedValue: 8.2,
+      parentClause: 'WHERE'
+    };
+
+    const cte: CteScope = {
+      id: 'cte-1',
+      aliasName: 'top_directors',
+      query: "SELECT director_id FROM directors WHERE nationality = 'American'",
+      events: [],
+      outputRows: [{ director_id: 1 }]
+    };
+
+    const explainNode: ExplainNode = {
+      id: 'node-1',
+      operatorType: 'HASH_JOIN',
+      description: 'JOIN r.movie_id = m.movie_id',
+      timingMs: 1.2,
+      cardinality: 15,
+      children: []
+    };
+
+    const plan: ExecutionPlan = {
+      query: 'WITH top_directors AS (...) SELECT * FROM top_directors',
+      stages: ['FROM', 'SELECT'],
+      events: [],
+      finalResult: [],
+      columns: ['director_id'],
+      cteScopes: [cte],
+      explainTree: explainNode
+    };
+
+    expect(subquery.resolvedValue).toBe(8.2);
+    expect(cte.aliasName).toBe('top_directors');
+    expect(plan.cteScopes?.[0].aliasName).toBe('top_directors');
+    expect(plan.explainTree?.operatorType).toBe('HASH_JOIN');
+  });
+});
+
 
