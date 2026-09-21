@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ExplainNode } from '../types';
-import { GitFork, ChevronDown, ChevronRight, Clock, BarChart3, Cpu, Info } from 'lucide-react';
+import { GitFork, ChevronDown, ChevronRight, Clock, BarChart3, Info, Maximize2, Minimize2 } from 'lucide-react';
 
 export interface ExplainTreeVisualizerProps {
   rootNode?: ExplainNode;
@@ -47,13 +47,13 @@ const NodeCard: React.FC<NodeCardProps> = ({
   const colorClass = getOperatorColorClass(node.operatorType);
 
   return (
-    <div className="flex flex-col gap-2 relative">
+    <div className="flex flex-col gap-1.5 relative">
       <div
         role="button"
         tabIndex={0}
         data-testid={`operator-node-${node.id}`}
         onClick={() => onSelect(node)}
-        className={`p-3 rounded border font-mono transition-all cursor-pointer ${
+        className={`p-2 rounded border font-mono transition-all cursor-pointer ${
           isSelected
             ? 'bg-surface border-accent shadow-md ring-1 ring-accent/50'
             : 'bg-surface border-border hover:border-secondary'
@@ -75,7 +75,7 @@ const NodeCard: React.FC<NodeCardProps> = ({
                 {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
               </button>
             )}
-            <span className={`px-2 py-0.5 text-xs font-bold rounded border ${colorClass}`}>
+            <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded border ${colorClass}`}>
               {node.operatorType}
             </span>
           </div>
@@ -97,14 +97,14 @@ const NodeCard: React.FC<NodeCardProps> = ({
         </div>
 
         {node.description && (
-          <div className="mt-2 text-xs text-primary truncate font-sans" title={node.description}>
+          <div className="mt-1 text-[11px] text-primary truncate font-sans" title={node.description}>
             {node.description}
           </div>
         )}
       </div>
 
       {hasChildren && !isCollapsed && (
-        <div className="pl-6 border-l-2 border-border/60 ml-3 space-y-2.5 pt-1">
+        <div className="pl-4 border-l border-border/60 ml-2 space-y-1.5 pt-0.5">
           {node.children.map((child) => (
             <NodeCard
               key={child.id}
@@ -148,6 +148,13 @@ export const ExplainTreeVisualizer: React.FC<ExplainTreeVisualizerProps> = ({
     });
   };
 
+  const collectNodeIds = (node: ExplainNode): string[] => [
+    node.id,
+    ...node.children.flatMap(collectNodeIds),
+  ];
+
+  const allNodeIds = rootNode ? collectNodeIds(rootNode) : [];
+
   if (!rootNode) {
     return (
       <div className="flex flex-col gap-3 bg-surface-secondary border border-border p-4 rounded font-sans text-xs">
@@ -167,21 +174,59 @@ export const ExplainTreeVisualizer: React.FC<ExplainTreeVisualizerProps> = ({
   const activeSelected = selectedNode ?? rootNode;
 
   return (
-    <div className="flex flex-col gap-4 bg-surface-secondary border border-border p-4 rounded font-sans text-xs">
+    <div className="flex h-full min-h-0 flex-col gap-2 bg-surface-secondary border border-border p-3 rounded font-sans text-xs">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border pb-2.5">
+      <div className="flex items-center justify-between border-b border-border pb-2">
         <div className="flex items-center gap-2 font-mono font-semibold text-primary">
           <GitFork size={14} className="text-accent" />
           <span>EXPLAIN OPERATOR TREE</span>
         </div>
-        <div className="flex items-center gap-2 text-[11px] font-mono text-muted">
-          <Cpu size={12} className="text-accent" />
-          <span>DuckDB Physical Plan</span>
+        <div className="flex items-center gap-2 text-[10px] font-mono text-muted">
+          <span>{allNodeIds.length} operators</span>
+          <button
+            type="button"
+            onClick={() => setCollapsedNodes(new Set())}
+            className="p-1 rounded hover:bg-surface text-secondary hover:text-primary"
+            title="Expand all operators"
+            aria-label="Expand all operators"
+          >
+            <Maximize2 size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setCollapsedNodes(new Set(allNodeIds))}
+            className="p-1 rounded hover:bg-surface text-secondary hover:text-primary"
+            title="Collapse all operators"
+            aria-label="Collapse all operators"
+          >
+            <Minimize2 size={12} />
+          </button>
         </div>
       </div>
 
+      {/* Keep the selected node summary visible while the operator tree scrolls. */}
+      {activeSelected && (
+        <div className="shrink-0 bg-surface border border-border rounded px-2.5 py-2 font-mono">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <Info size={12} className="shrink-0 text-accent" />
+              <span className="text-[10px] text-muted uppercase">Selected</span>
+              <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded border ${getOperatorColorClass(activeSelected.operatorType)}`}>
+                {activeSelected.operatorType}
+              </span>
+            </div>
+            <span className="shrink-0 text-[10px] text-muted">
+              {activeSelected.timingMs !== undefined ? `${activeSelected.timingMs} ms` : 'timing N/A'}
+            </span>
+          </div>
+          <div className="mt-1 truncate text-[11px] text-primary" title={activeSelected.description}>
+            {activeSelected.description || 'No operator description'}
+          </div>
+        </div>
+      )}
+
       {/* Hierarchical Operator Graph Tree */}
-      <div className="space-y-3 overflow-x-auto">
+      <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
         <NodeCard
           node={rootNode}
           selectedNode={activeSelected}
@@ -193,7 +238,11 @@ export const ExplainTreeVisualizer: React.FC<ExplainTreeVisualizerProps> = ({
 
       {/* Selected Node Details Inspector */}
       {activeSelected && (
-        <div className="bg-surface border border-border rounded p-3 font-mono space-y-2 mt-2">
+        <details className="shrink-0 bg-surface border border-border rounded font-mono">
+          <summary className="cursor-pointer list-none px-2.5 py-2 text-[10px] font-semibold text-secondary uppercase">
+            Selected operator details
+          </summary>
+          <div className="space-y-2 border-t border-border px-2.5 py-2">
           <div className="flex items-center justify-between border-b border-border pb-1.5 text-xs">
             <div className="flex items-center gap-1.5 text-accent font-semibold">
               <Info size={13} />
@@ -226,7 +275,8 @@ export const ExplainTreeVisualizer: React.FC<ExplainTreeVisualizerProps> = ({
               </span>
             </div>
           </div>
-        </div>
+          </div>
+        </details>
       )}
     </div>
   );
