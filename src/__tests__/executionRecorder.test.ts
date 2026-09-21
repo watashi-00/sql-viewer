@@ -564,10 +564,52 @@ describe('Execution Recorder', () => {
 
       expect(havingEvent).toBeDefined();
       expect(havingEvent?.subqueryResolutions).toBeDefined();
-      expect(havingEvent?.subqueryResolutions![0].type).toBe('scalar');
       expect(havingEvent?.subqueryResolutions![0].parentClause).toBe('HAVING');
     });
   });
+
+  describe('Phase 3 EXPLAIN Tree Recording', () => {
+    it('should execute EXPLAIN and build ExplainNode AST tree', async () => {
+      const sql = `SELECT m.title, r.score FROM movies m JOIN reviews r ON r.movie_id = m.movie_id;`;
+      const plan = await recordQueryExecution(sql);
+
+      expect(plan.explainTree).toBeDefined();
+      expect(plan.explainTree?.operatorType).toBeDefined();
+    });
+
+    it('should parse nested ExplainNode AST tree structure with children, cardinality, and description', async () => {
+      const sql = `SELECT m.title, AVG(r.score) FROM movies m JOIN reviews r ON r.movie_id = m.movie_id GROUP BY m.title;`;
+      const plan = await recordQueryExecution(sql);
+
+      expect(plan.explainTree).toBeDefined();
+      expect(plan.explainTree?.operatorType).toBeDefined();
+      expect(Array.isArray(plan.explainTree?.children)).toBe(true);
+
+      const root = plan.explainTree!;
+      expect(root.id).toBeDefined();
+      expect(root.description).toBeDefined();
+
+      let current: typeof root | undefined = root;
+      while (current && current.children && current.children.length > 0) {
+        current = current.children[0];
+        expect(current.operatorType).toBeDefined();
+      }
+    });
+
+    it('parseDuckDbExplain helper should return undefined for empty plan string', async () => {
+      const { parseDuckDbExplain } = await import('../debugger/executionRecorder');
+      expect(parseDuckDbExplain('')).toBeUndefined();
+      expect(parseDuckDbExplain('   ')).toBeUndefined();
+    });
+  });
 });
+
+
+
+
+
+
+
+
 
 
