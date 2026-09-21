@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { recordQueryExecution } from '../debugger/executionRecorder';
+import {
+  recordQueryExecution,
+  getGroupKey,
+  extractColValue,
+} from '../debugger/executionRecorder';
 import { seedMoviesDataset } from '../database/schema';
 import { resetDatabase, executeQuery } from '../database/duckdb';
 
@@ -304,6 +308,62 @@ describe('Execution Recorder', () => {
       expect(rejectedBarbie).toBeDefined();
     });
 
+    it('should correctly match composite GROUP BY keys in HAVING stage', async () => {
+      const sql = `
+        SELECT m.genre, m.year, COUNT(r.score) AS review_count
+        FROM movies m
+        JOIN reviews r ON r.movie_id = m.movie_id
+        GROUP BY m.genre, m.year
+        HAVING COUNT(r.score) > 1
+      `;
+      const plan = await recordQueryExecution(sql);
+      expect(plan.stages).toContain('HAVING');
+
+      const havingEvent = plan.events.find((e) => e.stage === 'HAVING');
+      expect(havingEvent).toBeDefined();
+      expect(havingEvent?.groupBuckets).toBeDefined();
+      expect(havingEvent?.rejectedGroupBuckets).toBeDefined();
+
+      const passedKeys = havingEvent!.groupBuckets!.map((b) => b.groupKey);
+      const rejectedKeys = havingEvent!.rejectedGroupBuckets!.map((b) => b.groupKey);
+
+      // In movies + reviews dataset:
+      // Inception (Sci-Fi, 2010): 2 reviews -> pass
+      // Interstellar (Sci-Fi, 2014): 2 reviews -> pass
+      // Oppenheimer (Biography, 2023): 2 reviews -> pass
+      // Pulp Fiction (Crime, 1994): 1 review -> reject
+      // Barbie (Comedy, 2023): 1 review -> reject
+      expect(passedKeys).toContain('Sci-Fi, 2010');
+      expect(passedKeys).toContain('Sci-Fi, 2014');
+      expect(passedKeys).toContain('Biography, 2023');
+      expect(rejectedKeys).toContain('Crime, 1994');
+      expect(rejectedKeys).toContain('Comedy, 2023');
+
+      for (const bucket of havingEvent!.groupBuckets!) {
+        expect(bucket.havingPassed).toBe(true);
+      }
+      for (const bucket of havingEvent!.rejectedGroupBuckets!) {
+        expect(bucket.havingPassed).toBe(false);
+      }
+    });
+
+    it('should not synthesize fallback aggregates when query has no aggregate functions', async () => {
+      const sql = `
+        SELECT m.genre
+        FROM movies m
+        GROUP BY m.genre
+      `;
+      const plan = await recordQueryExecution(sql);
+      const groupEvent = plan.events.find((e) => e.stage === 'GROUP BY');
+      expect(groupEvent).toBeDefined();
+      expect(groupEvent?.groupBuckets).toBeDefined();
+      expect(groupEvent!.groupBuckets!.length).toBeGreaterThan(0);
+
+      for (const bucket of groupEvent!.groupBuckets!) {
+        expect(bucket.aggregates).toEqual([]);
+      }
+    });
+
     it('should record DISTINCT deduplication metrics', async () => {
       const sql = `SELECT DISTINCT genre FROM movies`;
       const plan = await recordQueryExecution(sql);
@@ -314,6 +374,52 @@ describe('Execution Recorder', () => {
       expect(distinctEvent?.distinctDuplicatesRemoved).toBeDefined();
       expect(distinctEvent?.distinctDuplicatesRemoved).toBeGreaterThanOrEqual(0);
       expect(distinctEvent?.outputRows.length).toBeLessThanOrEqual(distinctEvent!.inputRows.length);
+    });
+  });
+
+  describe('getGroupKey and extractColValue helper functions', () => {
+    describe('getGroupKey', () => {
+      it('should format normal column values', () => {
+        expect(getGroupKey({ genre: 'Sci-Fi' }, 'genre')).toBe('Sci-Fi');
+        expect(getGroupKey({ 'm.genre': 'Sci-Fi' }, 'm.genre')).toBe('Sci-Fi');
+        expect(getGroupKey({ genre: 'Sci-Fi' }, 'm.genre')).toBe('Sci-Fi');
+        expect(getGroupKey({ 'm.genre': 'Sci-Fi' }, 'genre')).toBe('Sci-Fi');
+      });
+
+      it('should format composite column keys', () => {
+        expect(getGroupKey({ genre: 'Sci-Fi', year: 2010 }, 'genre, year')).toBe('Sci-Fi, 2010');
+        expect(getGroupKey({ 'm.genre': 'Sci-Fi', 'm.year': 2010 }, 'm.genre, m.year')).toBe('Sci-Fi, 2010');
+      });
+
+      it('should represent null grouped values as NULL without hardcoded fallbacks', () => {
+        expect(getGroupKey({ genre: null }, 'genre')).toBe('NULL');
+        expect(getGroupKey({ genre: 'Sci-Fi', year: null }, 'genre, year')).toBe('Sci-Fi, NULL');
+        expect(getGroupKey({ genre: null, year: null }, 'genre, year')).toBe('NULL, NULL');
+      });
+
+      it('should return Group when columns are missing rather than falling back to m.title', () => {
+        expect(getGroupKey({ title: 'Inception', score: 9 }, 'other_col')).toBe('Group');
+        expect(getGroupKey({ 'm.title': 'Inception' }, 'other_col')).toBe('Group');
+        expect(getGroupKey({}, 'genre')).toBe('Group');
+        expect(getGroupKey({ genre: 'Sci-Fi' }, '')).toBe('Group');
+      });
+    });
+
+    describe('extractColValue', () => {
+      it('should extract existing values correctly', () => {
+        expect(extractColValue({ score: 9 }, 'score')).toBe(9);
+        expect(extractColValue({ 'r.score': 9 }, 'r.score')).toBe(9);
+        expect(extractColValue({ score: 9 }, 'r.score')).toBe(9);
+        expect(extractColValue({ 'r.score': 9 }, 'score')).toBe(9);
+      });
+
+      it('should preserve null values and return null when column is missing', () => {
+        expect(extractColValue({ score: null }, 'score')).toBe(null);
+        expect(extractColValue({ 'r.score': null }, 'score')).toBe(null);
+        // Does not fall back to r.score or score
+        expect(extractColValue({ score: 9, 'r.score': 9 }, 'other_col')).toBe(null);
+        expect(extractColValue({}, 'other_col')).toBe(null);
+      });
     });
   });
 });

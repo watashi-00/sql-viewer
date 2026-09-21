@@ -58,14 +58,16 @@ export function getGroupKey(row: DataRow, groupByClause: string): string {
         val = row[matchingKey];
       }
     }
-    if (val !== undefined && val !== null) {
+    if (val === null) {
+      vals.push('NULL');
+    } else if (val !== undefined) {
       vals.push(String(val));
     }
   }
   if (vals.length > 0) {
     return vals.join(', ');
   }
-  return String(row['m.title'] ?? row['title'] ?? 'Group');
+  return 'Group';
 }
 
 /**
@@ -80,7 +82,7 @@ export function extractColValue(row: DataRow, expression: string): RowValue {
     const key = Object.keys(row).find((k) => k.endsWith(`.${expression}`) || k === expression);
     if (key && row[key] !== undefined) return row[key];
   }
-  return row['r.score'] ?? row['score'];
+  return null;
 }
 
 /**
@@ -596,26 +598,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     const aggDefs = extractAggregatesFromSql(selectClause, havingClause);
 
     const groupBuckets: GroupBucket[] = Array.from(bucketMap.entries()).map(([key, rows]) => {
-      let aggregates = computeBucketAggregates(rows, aggDefs);
-      if (aggregates.length === 0) {
-        const scores = rows
-          .map((r) => r['r.score'] ?? r['score'])
-          .filter((v) => v !== null && v !== undefined) as number[];
-        if (scores.length > 0) {
-          const sum = scores.reduce((a, b) => Number(a) + Number(b), 0);
-          const count = scores.length;
-          const avg = count > 0 ? Number((sum / count).toFixed(2)) : 0;
-          aggregates = [
-            {
-              funcName: 'AVG',
-              expression: 'r.score',
-              inputValues: scores,
-              formulaStep: `(${scores.join(' + ')}) / ${count}`,
-              finalValue: avg,
-            },
-          ];
-        }
-      }
+      const aggregates = computeBucketAggregates(rows, aggDefs);
 
       return {
         groupKey: key,
@@ -659,11 +642,11 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
 
     let passedKeys = new Set<string>();
     try {
-      const keyQuery = `SELECT ${groupByClause} AS _group_key FROM ${fromJoinClause} ${
+      const keyQuery = `SELECT ${groupByClause} FROM ${fromJoinClause} ${
         whereClause ? `WHERE ${whereClause}` : ''
       } GROUP BY ${groupByClause} HAVING ${havingClause}`;
       const keyRes = await executeQuery(keyQuery);
-      passedKeys = new Set(keyRes.rows.map((r) => String(r._group_key ?? '')));
+      passedKeys = new Set(keyRes.rows.map((r) => getGroupKey(r, groupByClause)));
     } catch {
       havingRows.forEach((r) => {
         const k = getGroupKey(r, groupByClause);
