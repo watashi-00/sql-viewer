@@ -1,13 +1,15 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DatabaseExplorer } from './schema/DatabaseExplorer';
 import { SqlEditor } from './editor/SqlEditor';
+import { VisualQueryBuilder } from './builder/VisualQueryBuilder';
 import { ExecutionVisualizer } from './visualizer/ExecutionVisualizer';
 import { ResultGrid } from './inspector/ResultGrid';
 import { Play, RotateCcw, Layers } from 'lucide-react';
 import { useWorkspaceStore } from './state/useWorkspaceStore';
 
 export const App: React.FC = () => {
-  const { runQuery, restartDebug } = useWorkspaceStore();
+  const [activeTab, setActiveTab] = useState<'editor' | 'builder'>('editor');
+  const { schema, setSql, runQuery, restartDebug } = useWorkspaceStore();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -57,10 +59,43 @@ export const App: React.FC = () => {
 
         {/* Center Main Panels */}
         <div className="flex-1 flex flex-col h-full overflow-hidden">
-          {/* Top Half: Editor + Visualizer */}
+          {/* Main Workspace Mode Header / Tabs */}
+          <div className="h-9 px-3 bg-surface-secondary border-b border-border flex items-center justify-between text-xs shrink-0">
+            <div className="flex items-center gap-1 bg-surface border border-border p-0.5 rounded">
+              <button
+                onClick={() => setActiveTab('editor')}
+                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  activeTab === 'editor'
+                    ? 'bg-accent/20 text-accent font-semibold'
+                    : 'text-muted hover:text-secondary'
+                }`}
+              >
+                Monaco SQL Editor
+              </button>
+              <button
+                onClick={() => setActiveTab('builder')}
+                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  activeTab === 'builder'
+                    ? 'bg-accent/20 text-accent font-semibold'
+                    : 'text-muted hover:text-secondary'
+                }`}
+              >
+                Visual Query Builder
+              </button>
+            </div>
+          </div>
+
+          {/* Top Half: Editor/Builder + Visualizer */}
           <div className="h-1/2 flex border-b border-border">
-            <div className="w-1/2 h-full">
-              <SqlEditor />
+            <div className="w-1/2 h-full overflow-hidden">
+              {activeTab === 'editor' ? (
+                <SqlEditor />
+              ) : (
+                <VisualQueryBuilder
+                  schema={schema || { name: 'main', tables: [] }}
+                  onSqlChange={setSql}
+                />
+              )}
             </div>
             <div className="w-1/2 h-full border-l border-border">
               <ExecutionVisualizer />
@@ -68,7 +103,7 @@ export const App: React.FC = () => {
           </div>
 
           {/* Bottom Half: Result Grid */}
-          <div className="h-1/2 h-full">
+          <div className="flex-1 overflow-hidden">
             <ResultGrid />
           </div>
         </div>

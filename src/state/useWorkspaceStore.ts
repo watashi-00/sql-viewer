@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { DebugState, ExecutionPlan, OperationType, Schema, DataRow } from '../types';
 import { recordQueryExecution } from '../debugger/executionRecorder';
 import { getIntrospectedSchema, seedMoviesDataset } from '../database/schema';
+import { addHistoryItem } from '../storage/historyStore';
 
 export const DEFAULT_QUERY = `SELECT
     m.title,
@@ -58,8 +59,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   runQuery: async () => {
     set({ debugState: 'running' });
+    const startTime = performance.now();
     try {
       const plan = await recordQueryExecution(get().sql);
+      const durationMs = performance.now() - startTime;
       set({
         executionPlan: plan,
         stages: plan.stages,
@@ -68,8 +71,26 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         resultColumns: plan.columns,
         debugState: 'paused',
       });
-    } catch (_err) {
+      await addHistoryItem({
+        id: `h-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        sql: get().sql,
+        timestamp: Date.now(),
+        durationMs,
+        rowCount: plan.finalResult.length,
+        status: 'success',
+      });
+    } catch (err: any) {
+      const durationMs = performance.now() - startTime;
       set({ debugState: 'error' });
+      await addHistoryItem({
+        id: `h-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        sql: get().sql,
+        timestamp: Date.now(),
+        durationMs,
+        rowCount: 0,
+        status: 'error',
+        errorMessage: err?.message || 'Query execution error',
+      });
     }
   },
 

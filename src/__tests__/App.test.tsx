@@ -228,4 +228,76 @@ describe('App Component Layout and Integration', () => {
     expect(sidebar).not.toBeNull();
     expect(sidebar?.contains(container.querySelector('div:has(> span)')!)).toBeDefined();
   });
+
+  it('renders center main workspace tab header [ Monaco SQL Editor | Visual Query Builder ] and switches view', () => {
+    act(() => {
+      root.render(React.createElement(App));
+    });
+
+    const editorTabBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('Monaco SQL Editor') || b.textContent?.includes('SQL Editor')
+    );
+    const builderTabBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Visual Query Builder')
+    );
+
+    expect(editorTabBtn).toBeDefined();
+    expect(builderTabBtn).toBeDefined();
+
+    // Default: Monaco SQL Editor is active
+    expect(container.querySelector('[data-testid="mock-monaco-editor"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('VISUAL QUERY BUILDER');
+
+    // Click Visual Query Builder tab
+    act(() => {
+      builderTabBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('VISUAL QUERY BUILDER');
+
+    // Click back to SQL Editor tab
+    act(() => {
+      editorTabBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.querySelector('[data-testid="mock-monaco-editor"]')).not.toBeNull();
+  });
+
+  it('renders FileDropzone and sidebar tabs [ Tables | History & Snippets ] in DatabaseExplorer sidebar', () => {
+    act(() => {
+      root.render(React.createElement(App));
+    });
+
+    // FileDropzone should be present in sidebar
+    expect(container.textContent).toContain('Drop data files here, or click to browse');
+
+    // Sidebar tabs [ Tables ] [ History & Snippets ]
+    const tablesTab = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'Tables'
+    );
+    const historyTab = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('History')
+    );
+
+    expect(tablesTab).toBeDefined();
+    expect(historyTab).toBeDefined();
+  });
+
+  it('switches DatabaseExplorer sidebar tab to History & Snippets and renders HistoryPanel', async () => {
+    act(() => {
+      root.render(React.createElement(App));
+    });
+
+    const historyTab = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('History')
+    );
+    expect(historyTab).toBeDefined();
+
+    await act(async () => {
+      historyTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('Query History & Snippets');
+  });
 });
+

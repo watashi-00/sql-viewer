@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useWorkspaceStore } from '../state/useWorkspaceStore';
 import * as schemaModule from '../database/schema';
 import * as recorderModule from '../debugger/executionRecorder';
+import * as historyStoreModule from '../storage/historyStore';
 import { Schema, ExecutionPlan } from '../types';
 
 describe('Workspace Store', () => {
@@ -197,5 +198,28 @@ LIMIT 5;`,
     await useWorkspaceStore.getState().runQuery();
 
     expect(useWorkspaceStore.getState().debugState).toBe('error');
+  });
+
+  it('should automatically record executed queries into historyStore on runQuery success', async () => {
+    const mockPlan: ExecutionPlan = {
+      query: 'SELECT * FROM movies',
+      stages: ['FROM', 'SELECT'],
+      events: [],
+      finalResult: [{ movie_id: 1 }],
+      columns: ['movie_id'],
+    };
+
+    const addHistorySpy = vi.spyOn(historyStoreModule, 'addHistoryItem').mockResolvedValue(undefined);
+    vi.spyOn(recorderModule, 'recordQueryExecution').mockResolvedValue(mockPlan);
+
+    await useWorkspaceStore.getState().runQuery();
+
+    expect(addHistorySpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sql: useWorkspaceStore.getState().sql,
+        rowCount: 1,
+        status: 'success',
+      })
+    );
   });
 });
