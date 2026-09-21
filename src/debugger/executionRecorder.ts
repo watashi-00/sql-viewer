@@ -1,6 +1,6 @@
 import { executeQuery } from '../database/duckdb';
 import { extractPipelineStages, extractPredicateTree } from '../parser/sqlParser';
-import { ExecutionEvent, ExecutionPlan, DataRow, JoinMatch } from '../types';
+import { ExecutionEvent, ExecutionPlan, DataRow, JoinMatch, RowValue } from '../types';
 
 /**
  * Maps rows to include keys prefixed by table alias as well as unaliased keys.
