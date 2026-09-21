@@ -268,8 +268,10 @@ export async function registerAndLoadFile(
   const tableName = sanitized || 'custom_table';
   const escapedTableName = tableName.replace(/"/g, '""');
   const escapedFileName = fileName.replace(/'/g, "''");
+  const fileSize = buffer.byteLength;
+  const databaseBuffer = buffer.slice();
 
-  await db.registerFileBuffer(fileName, buffer);
+  await db.registerFileBuffer(fileName, databaseBuffer);
 
   let readFn = 'read_csv_auto';
   if (format === 'json') {
@@ -293,7 +295,7 @@ export async function registerAndLoadFile(
   return {
     tableName,
     fileName,
-    fileSize: buffer.byteLength,
+    fileSize,
     format,
     rowCount,
     columns,

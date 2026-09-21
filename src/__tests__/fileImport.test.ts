@@ -40,6 +40,8 @@ describe('Custom Data File Import', () => {
     const result = await registerAndLoadFile('students.csv', buffer, 'csv');
 
     expect(result.tableName).toBe('students');
+    expect(result.fileSize).toBe(buffer.byteLength);
+    expect(buffer.byteLength).toBeGreaterThan(0);
     expect(result.rowCount).toBe(2);
     expect(result.columns.map((c) => c.name)).toEqual(['id', 'name', 'score']);
   });
