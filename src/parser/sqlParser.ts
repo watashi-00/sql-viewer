@@ -37,8 +37,27 @@ export function extractAliasMap(sql: string): Record<string, string> {
     // Regex fallback if AST parser encounters non-standard dialect syntax
   }
 
-  const fromMatches = sql.matchAll(/(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?/gi);
-  const keywords = new Set(['WHERE', 'JOIN', 'ON', 'GROUP', 'ORDER', 'LIMIT', 'HAVING', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'CROSS', 'NATURAL']);
+  const fromMatches = sql.matchAll(
+    /(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)(?:\s+(?:AS\s+)?(?!(?:JOIN|WHERE|ON|LEFT|RIGHT|INNER|OUTER|CROSS|NATURAL|FULL|GROUP|ORDER|LIMIT|HAVING|USING|UNION)\b)([a-zA-Z0-9_]+))?/gi
+  );
+  const keywords = new Set([
+    'WHERE',
+    'JOIN',
+    'ON',
+    'GROUP',
+    'ORDER',
+    'LIMIT',
+    'HAVING',
+    'LEFT',
+    'RIGHT',
+    'INNER',
+    'OUTER',
+    'CROSS',
+    'NATURAL',
+    'FULL',
+    'USING',
+    'UNION',
+  ]);
 
   for (const match of fromMatches) {
     const tableName = match[1];

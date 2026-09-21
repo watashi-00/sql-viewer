@@ -33,6 +33,28 @@ describe('SQL Parser & AST Analyzer', () => {
       expect(aliases.st).toBe('special_table');
       expect(aliases.at).toBe('another_tbl');
     });
+
+    it('should extract table names via regex fallback when multiple joins have no aliases', () => {
+      const sql =
+        'SELECT * FROM movies JOIN reviews ON reviews.movie_id = movies.id JOIN users ON users.id = reviews.user_id WHERE non_standard %%% syntax';
+      const aliases = extractAliasMap(sql);
+      expect(aliases).toEqual({
+        movies: 'movies',
+        reviews: 'reviews',
+        users: 'users',
+      });
+    });
+
+    it('should extract table names via regex fallback when joins use different join types without aliases', () => {
+      const sql =
+        'SELECT * FROM movies LEFT JOIN reviews ON reviews.movie_id = movies.id INNER JOIN users ON users.id = reviews.user_id WHERE non_standard %%% syntax';
+      const aliases = extractAliasMap(sql);
+      expect(aliases).toEqual({
+        movies: 'movies',
+        reviews: 'reviews',
+        users: 'users',
+      });
+    });
   });
 
   describe('extractPipelineStages', () => {
