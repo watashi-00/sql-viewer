@@ -57,6 +57,16 @@ describe('Custom Data File Import', () => {
     expect(result.columns.map((c) => c.name)).toContain('price');
   });
 
+  it('should replace an existing table when the same file is imported again', async () => {
+    const encoder = new TextEncoder();
+    await registerAndLoadFile('clients.json', encoder.encode('{"id":1}'), 'json');
+
+    const result = await registerAndLoadFile('clients.json', encoder.encode('{"id":2}\n{"id":3}'), 'json');
+
+    expect(result.tableName).toBe('clients');
+    expect(result.rowCount).toBe(2);
+  });
+
   it('should sanitize table names with special characters and dashes', async () => {
     const csvContent = 'val\n10';
     const encoder = new TextEncoder();

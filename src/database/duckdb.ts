@@ -135,6 +135,9 @@ export async function persistWorkspaceFile(file: {
     ...persistedWorkspace.files.filter((item) => item.tableName !== file.tableName),
     file,
   ];
+  persistedWorkspace.commands = persistedWorkspace.commands.filter(
+    (command) => command.tableName !== file.tableName
+  );
   await saveWorkspace(persistedWorkspace);
 }
 
@@ -275,7 +278,7 @@ export async function registerAndLoadFile(
     readFn = 'read_parquet';
   }
 
-  await executeQuery(`CREATE TABLE "${escapedTableName}" AS SELECT * FROM ${readFn}('${escapedFileName}')`);
+  await executeQuery(`CREATE OR REPLACE TABLE "${escapedTableName}" AS SELECT * FROM ${readFn}('${escapedFileName}')`);
 
   const schema = await fetchSchema();
   const tableMeta = schema.tables.find((t) => t.name === tableName);
