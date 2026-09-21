@@ -1,5 +1,6 @@
+import { Parser } from 'node-sql-parser';
 import { executeQuery } from '../database/duckdb';
-import { extractPipelineStages, extractPredicateTree } from '../parser/sqlParser';
+import { extractPipelineStages, extractPredicateTree, parseQueryAST } from '../parser/sqlParser';
 import {
   ExecutionEvent,
   ExecutionPlan,
@@ -8,6 +9,7 @@ import {
   RowValue,
   GroupBucket,
   GroupAggregateCalc,
+  CteScope,
 } from '../types';
 
 export interface AggregateDefinition {
@@ -227,7 +229,12 @@ function measureDuration(startTime: number): number {
  * Extracts individual query clauses for prefix query construction and descriptions.
  */
 function extractClauses(sql: string) {
-  const cleanSql = sql.replace(/;+\s*$/, '').trim();
+  let cleanSql = sql.replace(/;+\s*$/, '').trim();
+
+  const withMatch = cleanSql.match(/^\s*WITH\s+[\s\S]*?\)\s*(SELECT\b[\s\S]*)$/i);
+  if (withMatch) {
+    cleanSql = withMatch[1].trim();
+  }
 
   // Extract FROM ... clause up to WHERE, GROUP BY, HAVING, ORDER BY, LIMIT
   const fromJoinMatch = cleanSql.match(
@@ -300,6 +307,50 @@ function extractClauses(sql: string) {
 }
 
 export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> {
+  const ast = parseQueryAST(sql);
+  const astObj: any = Array.isArray(ast) ? ast[0] : ast;
+
+  let cteScopes: CteScope[] | undefined = undefined;
+
+  if (astObj && astObj.with && Array.isArray(astObj.with) && astObj.with.length > 0) {
+    cteScopes = [];
+    const parser = new Parser();
+    for (const cte of astObj.with) {
+      const aliasName =
+        typeof cte.name === 'object' && cte.name !== null && 'value' in cte.name
+          ? cte.name.value
+          : String(cte.name);
+
+      let cteSql = '';
+      const regex = new RegExp(`\\b${aliasName}\\s+AS\\s*\\(([\\s\\S]*?)\\)(?:\\s*,|\\s*SELECT|\\s*WITH|$)`, 'i');
+      const m = sql.match(regex);
+      if (m) {
+        cteSql = m[1].trim();
+      } else {
+        try {
+          const innerAst = cte.stmt?.ast || cte.stmt;
+          cteSql = parser.sqlify(innerAst).replace(/`/g, '');
+        } catch {
+          cteSql = '';
+        }
+      }
+
+      // Record CTE execution recursively
+      const ctePlan = await recordQueryExecution(cteSql);
+
+      // Register temporary table in DuckDB WASM
+      await executeQuery(`CREATE OR REPLACE TEMP TABLE ${aliasName} AS (${cteSql})`);
+
+      cteScopes.push({
+        id: `cte-${aliasName}`,
+        aliasName,
+        query: cteSql,
+        events: ctePlan.events,
+        outputRows: ctePlan.finalResult,
+      });
+    }
+  }
+
   const stages = extractPipelineStages(sql);
   const events: ExecutionEvent[] = [];
 
@@ -798,5 +849,6 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     events,
     finalResult: finalRes.rows,
     columns: finalRes.columns,
+    ...(cteScopes && cteScopes.length > 0 ? { cteScopes } : {}),
   };
 }

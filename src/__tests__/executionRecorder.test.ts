@@ -422,5 +422,48 @@ describe('Execution Recorder', () => {
       });
     });
   });
+
+  describe('Phase 3 CTE Scope Recording', () => {
+    it('should record isolated CTE scopes for WITH clause queries', async () => {
+      const sql = `
+        WITH top_movies AS (
+          SELECT movie_id, title FROM movies WHERE year >= 2010
+        )
+        SELECT tm.title, r.score
+        FROM top_movies tm
+        JOIN reviews r ON r.movie_id = tm.movie_id;
+      `;
+      const plan = await recordQueryExecution(sql);
+
+      expect(plan.cteScopes).toBeDefined();
+      expect(plan.cteScopes?.length).toBe(1);
+      expect(plan.cteScopes![0].aliasName).toBe('top_movies');
+      expect(plan.cteScopes![0].outputRows.length).toBeGreaterThan(0);
+      expect(plan.cteScopes![0].events.length).toBeGreaterThan(0);
+    });
+
+    it('should record multiple CTE scopes in query execution plan', async () => {
+      const sql = `
+        WITH top_movies AS (
+          SELECT movie_id, title FROM movies WHERE year >= 2010
+        ),
+        high_reviews AS (
+          SELECT review_id, movie_id, score FROM reviews WHERE score >= 8
+        )
+        SELECT tm.title, hr.score
+        FROM top_movies tm
+        JOIN high_reviews hr ON hr.movie_id = tm.movie_id;
+      `;
+      const plan = await recordQueryExecution(sql);
+
+      expect(plan.cteScopes).toBeDefined();
+      expect(plan.cteScopes?.length).toBe(2);
+      expect(plan.cteScopes![0].aliasName).toBe('top_movies');
+      expect(plan.cteScopes![1].aliasName).toBe('high_reviews');
+      expect(plan.cteScopes![0].outputRows.length).toBeGreaterThan(0);
+      expect(plan.cteScopes![1].outputRows.length).toBeGreaterThan(0);
+    });
+  });
 });
+
 
