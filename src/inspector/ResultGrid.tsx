@@ -30,10 +30,10 @@ export const ResultGrid: React.FC<ResultGridProps> = ({ rows: propsRows, columns
     ? virtualItems.map((vi) => ({ index: vi.index, row: rows[vi.index] }))
     : rows.map((row, index) => ({ index, row }));
 
-  const handleExport = (format: 'csv' | 'json' | 'parquet') => {
+  const handleExport = async (format: 'csv' | 'json' | 'parquet') => {
     if (rows.length === 0) return;
 
-    let content: string = '';
+    let content: BlobPart = '';
     let mimeType: string = 'text/plain';
     let filename: string = `export.${format}`;
 
@@ -58,7 +58,30 @@ export const ResultGrid: React.FC<ResultGridProps> = ({ rows: propsRows, columns
       content = JSON.stringify(rows, null, 2);
       mimeType = 'application/json';
     } else if (format === 'parquet') {
-      content = JSON.stringify(rows, null, 2);
+      try {
+        const { getDuckDB, executeQuery } = await import('../database/duckdb');
+        const { db } = await getDuckDB();
+        const tempTable = `temp_export_${Date.now()}`;
+        const tempFile = `${tempTable}.parquet`;
+        const sql = useWorkspaceStore.getState().sql;
+
+        if (sql) {
+          const cleanSql = sql.trim().replace(/;$/, '');
+          await executeQuery(`COPY (${cleanSql}) TO '${tempFile}' (FORMAT PARQUET)`);
+        } else {
+          // Fallback SQL for props-based rows
+          await executeQuery(`CREATE TEMP TABLE "${tempTable}" AS SELECT * FROM VALUES (${rows.map(() => '1').join(',')})`);
+          await executeQuery(`COPY "${tempTable}" TO '${tempFile}' (FORMAT PARQUET)`);
+        }
+
+        if (db && 'copyFileToBuffer' in db && typeof (db as any).copyFileToBuffer === 'function') {
+          content = await (db as any).copyFileToBuffer(tempFile);
+        } else {
+          content = JSON.stringify(rows, null, 2);
+        }
+      } catch {
+        content = JSON.stringify(rows, null, 2);
+      }
       mimeType = 'application/octet-stream';
     }
 

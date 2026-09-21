@@ -27,12 +27,30 @@ export function buildSqlFromState(state: VisualQueryState): string {
 
   const selectClause = selectParts.length > 0 ? `SELECT ${selectParts.join(', ')}` : 'SELECT *';
 
-  // 2. FROM clause
+  // 2. FROM & JOIN clauses: handle connected vs disconnected table nodes
+  const joinedTableNames = new Set<string>();
+  state.joins.forEach((j) => {
+    joinedTableNames.add(j.leftTable);
+    joinedTableNames.add(j.rightTable);
+  });
+
   const firstNode = state.nodes[0];
   const firstTableExpr = firstNode.alias
     ? `${firstNode.tableName} AS ${firstNode.alias}`
     : firstNode.tableName;
-  let fromClause = `FROM ${firstTableExpr}`;
+
+  const unjoinedNodes = state.nodes.slice(1).filter((n) => {
+    const name = n.alias || n.tableName;
+    return !joinedTableNames.has(name) && !joinedTableNames.has(n.tableName);
+  });
+
+  const fromTableList = [firstTableExpr];
+  unjoinedNodes.forEach((n) => {
+    const expr = n.alias ? `${n.tableName} AS ${n.alias}` : n.tableName;
+    fromTableList.push(expr);
+  });
+
+  let fromClause = `FROM ${fromTableList.join(', ')}`;
 
   // 3. JOIN clause
   const joinClauses: string[] = [];
@@ -49,10 +67,24 @@ export function buildSqlFromState(state: VisualQueryState): string {
     if (f.table && f.column && f.operator) {
       let val = f.value;
       if (val !== undefined && val !== '') {
-        const isNumeric = !isNaN(Number(val)) && val.trim() !== '';
-        const formattedVal =
-          isNumeric || val.startsWith("'") || val.toUpperCase() === 'NULL' ? val : `'${val}'`;
-        whereParts.push(`${f.table}.${f.column} ${f.operator} ${formattedVal}`);
+        if (f.operator === 'IN') {
+          let formattedVal = val.trim();
+          if (!formattedVal.startsWith('(')) {
+            const parts = formattedVal.split(',').map((s) => {
+              const trimmed = s.trim();
+              if (!trimmed) return "''";
+              if (!isNaN(Number(trimmed)) || trimmed.startsWith("'")) return trimmed;
+              return `'${trimmed}'`;
+            });
+            formattedVal = `(${parts.join(', ')})`;
+          }
+          whereParts.push(`${f.table}.${f.column} IN ${formattedVal}`);
+        } else {
+          const isNumeric = !isNaN(Number(val)) && val.trim() !== '';
+          const formattedVal =
+            isNumeric || val.startsWith("'") || val.toUpperCase() === 'NULL' ? val : `'${val}'`;
+          whereParts.push(`${f.table}.${f.column} ${f.operator} ${formattedVal}`);
+        }
       }
     }
   });

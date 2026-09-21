@@ -7,6 +7,15 @@ import { useWorkspaceStore } from '../state/useWorkspaceStore';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+vi.mock('../database/duckdb', () => ({
+  getDuckDB: vi.fn().mockResolvedValue({
+    db: {
+      copyFileToBuffer: vi.fn().mockResolvedValue(new Uint8Array([80, 65, 82, 49])),
+    },
+  }),
+  executeQuery: vi.fn().mockResolvedValue([]),
+}));
+
 describe('RowInspector Component', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -335,7 +344,7 @@ describe('ResultGrid Component', () => {
     clickSpy.mockRestore();
   });
 
-  it('triggers Parquet download when Export Parquet button is clicked', () => {
+  it('triggers Parquet download when Export Parquet button is clicked', async () => {
     const createObjectURLSpy = vi.fn().mockReturnValue('blob:mock-parquet-url');
     const revokeObjectURLSpy = vi.fn();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
@@ -357,8 +366,9 @@ describe('ResultGrid Component', () => {
     );
     expect(parquetBtn).not.toBeUndefined();
 
-    act(() => {
+    await act(async () => {
       parquetBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 50));
     });
 
     expect(createObjectURLSpy).toHaveBeenCalled();

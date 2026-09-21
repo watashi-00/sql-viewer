@@ -1,36 +1,29 @@
-# Task 4 Execution Report: DuckDB WASM EXPLAIN Tree Parser & Execution Recorder Extension
+# Task 4 Execution Report: `<VisualQueryBuilder />` Canvas & AST Generator Component
 
-## Summary
-- **Task:** Phase 3 Task 4 - DuckDB WASM EXPLAIN Tree Parser & Execution Recorder Extension
-- **Status:** Completed (Code Review Fixes Applied)
-- **Commit:** `0a62c87f45e1d13ecff174d63d5983207eae3249` - `feat(debugger): parse DuckDB WASM EXPLAIN output into ExplainNode AST tree`
+## Task Summary
+Implemented Phase 4 Task 4: `<VisualQueryBuilder />` component in `src/builder/VisualQueryBuilder.tsx` and unit tests in `src/__tests__/VisualQueryBuilder.test.tsx`.
 
-## Implementation Details
-1. **EXPLAIN Query Execution:**
-   - In `recordQueryExecution(sql)`, executed `EXPLAIN <sql>` using DuckDB WASM (`executeQuery`).
-   - Retained plan output (`explain_value`, `physical_plan`, or `logical_plan`).
+## Key Changes
+1. **Component Creation (`src/builder/VisualQueryBuilder.tsx`)**:
+   - `VisualQueryBuilder` React component supporting:
+     - Header with title `VISUAL QUERY BUILDER` and dark mode theme.
+     - Table selection dropdown (`data-testid="add-table-select"`) & "Add Table" node button.
+     - Interactive Table Cards displaying table name, alias badge, select/deselect all column controls, and individual column checkboxes (`data-column={name}`).
+     - Join edge connector controls ("Add Join") supporting `INNER`, `LEFT`, `RIGHT`, `FULL` join types with left/right table & column dropdowns.
+     - Filter condition rows ("Add Filter") supporting table, column, operator (`=`, `!=`, `>`, `>=`, `<`, `<=`, `LIKE`, `IN`), and text value input (`data-testid="filter-value-input"`).
+     - Query Limit input field.
+     - SQL generator function `buildSqlFromState` that builds clean, properly-formatted SQL syntax (`SELECT`, `FROM`, `JOIN`, `WHERE`, `LIMIT`) and calls `onSqlChange(sql)` on every update.
+2. **Unit Tests (`src/__tests__/VisualQueryBuilder.test.tsx`)**:
+   - Written following TDD cycle.
+   - Tests rendering, adding table nodes, toggling column selection, adding join edges, adding filter conditions, and triggering `onSqlChange` callback with updated SQL.
 
-2. **DuckDB WASM EXPLAIN ASCII Box Parser (`parseDuckDbExplain`):**
-   - Implemented 2D grid text scanner in `src/debugger/executionRecorder.ts` to locate physical plan box boundaries (`┌`, `┐`, `└`, `┘`).
-   - Extracted `operatorType` (e.g. `HASH_JOIN`, `SEQ_SCAN`, `PROJECTION`, `FILTER`, `HASH_GROUP_BY`), cardinality estimates (`~8 rows`), timing measurements (if available), and structured node description details (`Join Type`, `Conditions`, `Table`, `Projections`, `Filters`).
-   - Grouped boxes into depth levels based on vertical row indices (`rStart`).
-   - Built hierarchical AST tree structure (`ExplainNode`), connecting parent operators to their child nodes horizontally aligned underneath.
+## Verification & Test Results
+- Ran unit test suite: `npx vitest run src/__tests__/VisualQueryBuilder.test.tsx` -> **4/4 passed**
+- Ran full test suite: `npx vitest run` -> **24/24 test files passed, 214/214 tests passed**
 
-3. **ExecutionPlan Extension:**
-   - Attached `explainTree?: ExplainNode` to the returned `ExecutionPlan` object in `recordQueryExecution`.
-
-## Code Review Fixes (Post Task 4 Review)
-- **Level Clustering Threshold**: Reduced vertical level clustering threshold in `src/debugger/executionRecorder.ts` from `<= 3` to `<= 1` to prevent vertically stacked operators from erroneously merging into the same level.
-- **Cardinality Regex**: Updated cardinality regex pattern from `/^EC:\s*(\d+)/i` to `/^EC:\s*~?(\d+)/i` to parse cardinality expressions prefixed with `~` (e.g., `EC: ~100`).
-- **ASCII Box Character Filtering & Operator Assignment**: Filtered ASCII box drawing characters `/[┌┐└┘├┤┬┴┼─]/` out of `descParts` and ensured `operatorType` is accurately set to the first non-metadata, non-divider line.
-- **Test Assertion & Unit Tests**: Restored missing `expect(havingEvent?.subqueryResolutions![0].type).toBe('scalar');` assertion and added a dedicated unit test executing `parseDuckDbExplain` on a multi-level ASCII string verifying depth levels, parent-child operator nodes, cardinality regex, and divider line filtering.
-
-## Test Results
-- **Unit Test File:** `src/__tests__/executionRecorder.test.ts`
-- **Command:** `npx vitest run src/__tests__/executionRecorder.test.ts`
-- **Result:** 31 / 31 tests passed.
-- **TypeScript Check:** `npx tsc --noEmit` passed cleanly.
-
-## Files Modified
-- `src/debugger/executionRecorder.ts`: Refined `parseDuckDbExplain` level clustering, cardinality regex, box divider filtering, and operator assignment.
-- `src/__tests__/executionRecorder.test.ts`: Restored subquery assertion and added multi-level ASCII explain parser unit test.
+## Commit Details
+- Commit Hash: `913cff152511523699710a953b626b9ed2268ecf`
+- Commit Message: `feat(builder): add VisualQueryBuilder drag-and-drop table and SQL generator component`
+- Modified/Created Files:
+  - `src/builder/VisualQueryBuilder.tsx`
+  - `src/__tests__/VisualQueryBuilder.test.tsx`
