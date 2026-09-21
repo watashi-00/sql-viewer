@@ -2,7 +2,7 @@ import * as duckdb from '@duckdb/duckdb-wasm';
 import type { DuckDBBindings, DuckDBConnection as DuckDBBlockingConnection } from '@duckdb/duckdb-wasm/blocking';
 import duckdb_wasm from '@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url';
 import mvp_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url';
-import { Schema, TableMeta, ColumnMeta, DataRow, RowValue } from '../types';
+import { Schema, TableMeta, ColumnMeta, DataRow, RowValue, CustomFileImport } from '../types';
 
 export type DuckDBInstance = duckdb.AsyncDuckDB | DuckDBBindings;
 export type DuckDBConnection = duckdb.AsyncDuckDBConnection | DuckDBBlockingConnection;
@@ -17,6 +17,12 @@ const isNodeEnvironment =
   (typeof process !== 'undefined' && Boolean(process.versions?.node));
 
 async function initNodeDuckDB(): Promise<{ db: DuckDBBindings; conn: DuckDBBlockingConnection }> {
+  if (typeof globalThis !== 'undefined' && 'XMLHttpRequest' in globalThis) {
+    delete (globalThis as any).XMLHttpRequest;
+  }
+  if (typeof window !== 'undefined' && 'XMLHttpRequest' in window) {
+    delete (window as any).XMLHttpRequest;
+  }
   const { createRequire } = await import(/* @vite-ignore */ 'module');
   const req = createRequire(import.meta.url);
   const duckdbNode = req('@duckdb/duckdb-wasm/dist/duckdb-node-blocking.cjs');
@@ -178,3 +184,43 @@ export async function fetchSchema(): Promise<Schema> {
     tables,
   };
 }
+
+export async function registerAndLoadFile(
+  fileName: string,
+  buffer: Uint8Array,
+  format: 'csv' | 'json' | 'parquet'
+): Promise<CustomFileImport> {
+  const { db } = await getDuckDB();
+
+  const sanitized = fileName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_');
+  const tableName = sanitized || 'custom_table';
+  const escapedTableName = tableName.replace(/"/g, '""');
+  const escapedFileName = fileName.replace(/'/g, "''");
+
+  await db.registerFileBuffer(fileName, buffer);
+
+  let readFn = 'read_csv_auto';
+  if (format === 'json') {
+    readFn = 'read_json_auto';
+  } else if (format === 'parquet') {
+    readFn = 'read_parquet';
+  }
+
+  await executeQuery(`CREATE TABLE "${escapedTableName}" AS SELECT * FROM ${readFn}('${escapedFileName}')`);
+
+  const schema = await fetchSchema();
+  const tableMeta = schema.tables.find((t) => t.name === tableName);
+
+  const columns = tableMeta ? tableMeta.columns : [];
+  const rowCount = tableMeta?.rowCount ?? 0;
+
+  return {
+    tableName,
+    fileName,
+    fileSize: buffer.byteLength,
+    format,
+    rowCount,
+    columns,
+  };
+}
+
