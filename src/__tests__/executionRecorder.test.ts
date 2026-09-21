@@ -3,6 +3,7 @@ import {
   recordQueryExecution,
   getGroupKey,
   extractColValue,
+  parseDuckDbExplain,
 } from '../debugger/executionRecorder';
 import { seedMoviesDataset } from '../database/schema';
 import { resetDatabase, executeQuery } from '../database/duckdb';
@@ -565,6 +566,7 @@ describe('Execution Recorder', () => {
       expect(havingEvent).toBeDefined();
       expect(havingEvent?.subqueryResolutions).toBeDefined();
       expect(havingEvent?.subqueryResolutions![0].parentClause).toBe('HAVING');
+      expect(havingEvent?.subqueryResolutions![0].type).toBe('scalar');
     });
   });
 
@@ -597,9 +599,64 @@ describe('Execution Recorder', () => {
     });
 
     it('parseDuckDbExplain helper should return undefined for empty plan string', async () => {
-      const { parseDuckDbExplain } = await import('../debugger/executionRecorder');
       expect(parseDuckDbExplain('')).toBeUndefined();
       expect(parseDuckDbExplain('   ')).toBeUndefined();
+    });
+
+    it('should parse multi-level ASCII box strings into parent-child ExplainNode AST tree with correct depth levels', () => {
+      const asciiPlan = [
+        '┌───────────────────────────┐',
+        '│        PROJECTION         │',
+        '│          EC: ~100         │',
+        '│          (0.5ms)          │',
+        '└─────────────┬─────────────┘',
+        '              │              ',
+        '┌─────────────┴─────────────┐',
+        '│          FILTER           │',
+        '│       score >= 7.0        │',
+        '│   ├───────────────────┤   │',
+        '│          EC: ~50          │',
+        '└─────────────┬─────────────┘',
+        '              │              ',
+        '┌─────────────┴─────────────┐',
+        '│         HASH_JOIN         │',
+        '│          EC: 50           │',
+        '└──────┬─────────────┬──────┘',
+        '       │             │       ',
+        '┌──────┴──────┐┌─────┴──────┐',
+        '│  SEQ_SCAN   ││  SEQ_SCAN  │',
+        '│   movies    ││  reviews   │',
+        '│    EC: 5    ││    EC: 8   │',
+        '└─────────────┘└────────────┘',
+      ].join('\n');
+
+      const root = parseDuckDbExplain(asciiPlan);
+      expect(root).toBeDefined();
+      expect(root?.operatorType).toBe('PROJECTION');
+      expect(root?.cardinality).toBe(100);
+      expect(root?.timingMs).toBe(0.5);
+      expect(root?.children.length).toBe(1);
+
+      const filterNode = root?.children[0];
+      expect(filterNode?.operatorType).toBe('FILTER');
+      expect(filterNode?.description).toBe('score >= 7.0');
+      expect(filterNode?.cardinality).toBe(50);
+      expect(filterNode?.children.length).toBe(1);
+
+      const joinNode = filterNode?.children[0];
+      expect(joinNode?.operatorType).toBe('HASH_JOIN');
+      expect(joinNode?.cardinality).toBe(50);
+      expect(joinNode?.children.length).toBe(2);
+
+      const leftChild = joinNode?.children[0];
+      const rightChild = joinNode?.children[1];
+      expect(leftChild?.operatorType).toBe('SEQ_SCAN');
+      expect(leftChild?.description).toBe('movies');
+      expect(leftChild?.cardinality).toBe(5);
+
+      expect(rightChild?.operatorType).toBe('SEQ_SCAN');
+      expect(rightChild?.description).toBe('reviews');
+      expect(rightChild?.cardinality).toBe(8);
     });
   });
 });

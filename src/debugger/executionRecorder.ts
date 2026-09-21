@@ -558,14 +558,17 @@ export function parseDuckDbExplain(explainText: string): ExplainNode | undefined
           }
 
           if (contentLines.length > 0) {
-            let operatorType = contentLines[0];
+            let operatorType = '';
             let cardinality: number | undefined = undefined;
             let timingMs: number | undefined = undefined;
             const descParts: string[] = [];
 
             for (let i = 0; i < contentLines.length; i++) {
               const lineStr = contentLines[i];
-              const cardMatch = lineStr.match(/~?(\d+)\s*rows?/i) || lineStr.match(/^EC:\s*(\d+)/i);
+              if (/[┌┐└┘├┤┬┴┼─]/.test(lineStr)) {
+                continue;
+              }
+              const cardMatch = lineStr.match(/~?(\d+)\s*rows?/i) || lineStr.match(/^EC:\s*~?(\d+)/i);
               if (cardMatch) {
                 cardinality = parseInt(cardMatch[1], 10);
                 continue;
@@ -580,14 +583,14 @@ export function parseDuckDbExplain(explainText: string): ExplainNode | undefined
                 timingMs = parseFloat(timingMsMatch[1]);
                 continue;
               }
-              if (i === 0) {
+              if (!operatorType) {
                 operatorType = lineStr;
               } else {
                 descParts.push(lineStr);
               }
             }
 
-            if (operatorType !== 'Query Profiling Information' && operatorType !== 'Total Time') {
+            if (operatorType && operatorType !== 'Query Profiling Information' && operatorType !== 'Total Time') {
               boxes.push({
                 id: `explain-node-${boxes.length + 1}`,
                 rStart: r,
@@ -614,7 +617,7 @@ export function parseDuckDbExplain(explainText: string): ExplainNode | undefined
   for (const box of sortedBoxes) {
     let placed = false;
     for (const level of levels) {
-      if (Math.abs(level[0].rStart - box.rStart) <= 3) {
+      if (Math.abs(level[0].rStart - box.rStart) <= 1) {
         level.push(box);
         placed = true;
         break;
