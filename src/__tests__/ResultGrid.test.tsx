@@ -240,4 +240,134 @@ describe('ResultGrid Component', () => {
     expect(container.textContent).toContain('ROW INSPECTOR');
     expect(container.textContent).toContain('Oppenheimer');
   });
+
+  it('renders export buttons for CSV, JSON, and Parquet', () => {
+    useWorkspaceStore.setState({
+      resultRows: [{ id: 1, name: 'Inception' }],
+      resultColumns: ['id', 'name'],
+    });
+
+    act(() => {
+      root.render(React.createElement(ResultGrid));
+    });
+
+    expect(container.textContent).toContain('Export CSV');
+    expect(container.textContent).toContain('Export JSON');
+    expect(container.textContent).toContain('Export Parquet');
+  });
+
+  it('accepts rows and columns props directly', () => {
+    act(() => {
+      root.render(React.createElement(ResultGrid, { rows: [{ id: 1, name: 'Inception' }], columns: ['id', 'name'] }));
+    });
+
+    expect(container.textContent).toContain('Export CSV');
+    expect(container.textContent).toContain('Inception');
+  });
+
+  it('triggers CSV download when Export CSV button is clicked', () => {
+    const createObjectURLSpy = vi.fn().mockReturnValue('blob:mock-csv-url');
+    const revokeObjectURLSpy = vi.fn();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    globalThis.URL.createObjectURL = createObjectURLSpy;
+    globalThis.URL.revokeObjectURL = revokeObjectURLSpy;
+
+    useWorkspaceStore.setState({
+      resultRows: [{ id: 1, title: 'Inception', comma: 'a,b' }],
+      resultColumns: ['id', 'title', 'comma'],
+    });
+
+    act(() => {
+      root.render(React.createElement(ResultGrid));
+    });
+
+    const csvBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('Export CSV')
+    );
+    expect(csvBtn).not.toBeUndefined();
+
+    act(() => {
+      csvBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(createObjectURLSpy).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
+
+    const createdBlob = createObjectURLSpy.mock.calls[0][0] as Blob;
+    expect(createdBlob.type).toBe('text/csv');
+
+    clickSpy.mockRestore();
+  });
+
+  it('triggers JSON download when Export JSON button is clicked', () => {
+    const createObjectURLSpy = vi.fn().mockReturnValue('blob:mock-json-url');
+    const revokeObjectURLSpy = vi.fn();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    globalThis.URL.createObjectURL = createObjectURLSpy;
+    globalThis.URL.revokeObjectURL = revokeObjectURLSpy;
+
+    useWorkspaceStore.setState({
+      resultRows: [{ id: 1, title: 'Inception' }],
+      resultColumns: ['id', 'title'],
+    });
+
+    act(() => {
+      root.render(React.createElement(ResultGrid));
+    });
+
+    const jsonBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('Export JSON')
+    );
+    expect(jsonBtn).not.toBeUndefined();
+
+    act(() => {
+      jsonBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(createObjectURLSpy).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
+
+    const createdBlob = createObjectURLSpy.mock.calls[0][0] as Blob;
+    expect(createdBlob.type).toBe('application/json');
+
+    clickSpy.mockRestore();
+  });
+
+  it('triggers Parquet download when Export Parquet button is clicked', () => {
+    const createObjectURLSpy = vi.fn().mockReturnValue('blob:mock-parquet-url');
+    const revokeObjectURLSpy = vi.fn();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    globalThis.URL.createObjectURL = createObjectURLSpy;
+    globalThis.URL.revokeObjectURL = revokeObjectURLSpy;
+
+    useWorkspaceStore.setState({
+      resultRows: [{ id: 1, title: 'Inception' }],
+      resultColumns: ['id', 'title'],
+    });
+
+    act(() => {
+      root.render(React.createElement(ResultGrid));
+    });
+
+    const parquetBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('Export Parquet')
+    );
+    expect(parquetBtn).not.toBeUndefined();
+
+    act(() => {
+      parquetBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(createObjectURLSpy).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
+
+    const createdBlob = createObjectURLSpy.mock.calls[0][0] as Blob;
+    expect(createdBlob.type).toBe('application/octet-stream');
+
+    clickSpy.mockRestore();
+  });
 });
+
