@@ -157,6 +157,10 @@ npm run build
 
 Automatic build and deployment to GitHub Pages is configured via `.github/workflows/deploy.yml`. Pushes or merges to `master` automatically compile the application and update the live site at `https://watashi-00.github.io/sql-viewer/`.
 
+Pull requests and pushes to `master` also run the validation workflow in `.github/workflows/ci.yml`, which installs dependencies, runs the full test suite, and builds the application.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and pull request guidelines.
+
 ---
 
 ## License
