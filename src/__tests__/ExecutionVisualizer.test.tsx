@@ -542,5 +542,133 @@ describe('ExecutionVisualizer Component', () => {
     expect(container.textContent).toContain('DISTINCT DEDUPLICATION');
     expect(container.textContent).toContain('1 Duplicates Collapsed');
   });
+
+  it('renders view mode toggle buttons and toggles between relational and explain view mode', () => {
+    const planWithExplain: ExecutionPlan = {
+      ...mockPlan,
+      explainTree: {
+        id: 'op-1',
+        operatorType: 'SEQ_SCAN',
+        description: 'Scan table movies',
+        children: [],
+      },
+    };
+
+    useWorkspaceStore.setState({
+      executionPlan: planWithExplain,
+      stages: planWithExplain.stages,
+      currentStageIndex: 0,
+      debugState: 'paused',
+    });
+
+    act(() => {
+      root.render(React.createElement(ExecutionVisualizer));
+    });
+
+    const relationalBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('Relational Pipeline')
+    );
+    const explainBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('Physical EXPLAIN Tree')
+    );
+
+    expect(relationalBtn).toBeDefined();
+    expect(explainBtn).toBeDefined();
+
+    expect(container.textContent).toContain('Stage: FROM');
+    expect(container.textContent).not.toContain('EXPLAIN OPERATOR TREE');
+
+    act(() => {
+      explainBtn?.click();
+    });
+
+    expect(container.textContent).toContain('EXPLAIN OPERATOR TREE');
+    expect(container.textContent).toContain('SEQ_SCAN');
+    expect(container.textContent).not.toContain('Stage: FROM');
+
+    act(() => {
+      relationalBtn?.click();
+    });
+
+    expect(container.textContent).toContain('Stage: FROM');
+    expect(container.textContent).not.toContain('EXPLAIN OPERATOR TREE');
+  });
+
+  it('renders CteVisualizer when executionPlan has cteScopes', () => {
+    const planWithCte: ExecutionPlan = {
+      ...mockPlan,
+      cteScopes: [
+        {
+          id: 'cte-recent',
+          aliasName: 'recent_movies',
+          query: 'SELECT * FROM movies WHERE year > 2000',
+          events: [],
+          outputRows: [{ id: 1, title: 'Inception' }],
+        },
+      ],
+    };
+
+    useWorkspaceStore.setState({
+      executionPlan: planWithCte,
+      stages: planWithCte.stages,
+      currentStageIndex: 0,
+      debugState: 'paused',
+    });
+
+    act(() => {
+      root.render(React.createElement(ExecutionVisualizer));
+    });
+
+    expect(container.textContent).toContain('CTE EXECUTION SCOPES');
+    expect(container.textContent).toContain('recent_movies');
+    expect(container.textContent).toContain('Main Query');
+
+    const cteTab = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('recent_movies')
+    );
+    expect(cteTab).toBeDefined();
+
+    act(() => {
+      cteTab?.click();
+    });
+
+    expect(container.textContent).toContain('WITH recent_movies AS');
+  });
+
+  it('renders SubqueryVisualizer when current event has subqueryResolutions', () => {
+    const planWithSubqueries: ExecutionPlan = {
+      ...mockPlan,
+      events: [
+        {
+          ...mockPlan.events[0],
+          subqueryResolutions: [
+            {
+              id: 'subq-1',
+              type: 'scalar',
+              rawQuery: 'SELECT MAX(score) FROM movies',
+              resolvedValue: 9.0,
+              parentClause: 'WHERE',
+            },
+          ],
+        },
+      ],
+    };
+
+    useWorkspaceStore.setState({
+      executionPlan: planWithSubqueries,
+      stages: planWithSubqueries.stages,
+      currentStageIndex: 0,
+      debugState: 'paused',
+    });
+
+    act(() => {
+      root.render(React.createElement(ExecutionVisualizer));
+    });
+
+    expect(container.textContent).toContain('SUBQUERY RESOLUTION INSPECTOR');
+    expect(container.textContent).toContain('SELECT MAX(score) FROM movies');
+    expect(container.textContent).toContain('9');
+  });
 });
+
 
