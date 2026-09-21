@@ -72,6 +72,12 @@ describe('Execution Recorder', () => {
     // Verify columns and final result
     expect(plan.columns).toEqual(['title', 'average_score']);
     expect(plan.finalResult.length).toBe(limitEvent?.outputRows.length);
+
+    // Verify duration measurement
+    for (const event of plan.events) {
+      expect(typeof event.durationMs).toBe('number');
+      expect(event.durationMs).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it('should record execution timeline for simple query without JOIN or GROUP BY', async () => {
@@ -90,8 +96,37 @@ describe('Execution Recorder', () => {
     expect(whereEvent?.rejectedRows?.length).toBe(2); // Inception (2010), Pulp Fiction (1994)
   });
 
+  it('should record execution timeline with deep row equality for table without movie_id', async () => {
+    const sql = `SELECT * FROM directors WHERE birth_year < 1970`;
+    const plan = await recordQueryExecution(sql);
+
+    expect(plan.stages).toEqual(['FROM', 'WHERE', 'SELECT']);
+    const whereEvent = plan.events.find((e) => e.stage === 'WHERE');
+    expect(whereEvent).toBeDefined();
+    expect(whereEvent?.inputRows.length).toBe(3);
+    expect(whereEvent?.outputRows.length).toBe(1); // Quentin Tarantino (1963)
+    expect(whereEvent?.rejectedRows?.length).toBe(2); // Nolan (1970), Gerwig (1983)
+    expect(whereEvent?.description).toContain('birth_year < 1970');
+  });
+
   it('should throw an error on invalid SQL query', async () => {
     const sql = `SELECT * FROM non_existent_table_xyz`;
     await expect(recordQueryExecution(sql)).rejects.toThrow();
+  });
+
+  describe('withAlias helper', () => {
+    it('should attach alias-prefixed keys alongside original keys', async () => {
+      const { withAlias } = await import('../debugger/executionRecorder');
+      const rows = [{ id: 1, name: 'Inception' }];
+      const result = withAlias(rows, 'm');
+      expect(result).toEqual([{ 'm.id': 1, id: 1, 'm.name': 'Inception', name: 'Inception' }]);
+    });
+
+    it('should return original rows if alias is empty', async () => {
+      const { withAlias } = await import('../debugger/executionRecorder');
+      const rows = [{ id: 1, name: 'Inception' }];
+      const result = withAlias(rows, '');
+      expect(result).toBe(rows);
+    });
   });
 });
