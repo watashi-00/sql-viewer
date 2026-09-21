@@ -3,6 +3,17 @@ import { SEED_MOVIES_SQL } from '../datasets/movies';
 import { Schema, TableMeta, ColumnMeta } from '../types';
 
 export async function seedMoviesDataset(): Promise<void> {
+  const existingTables = await executeQuery(`
+    SELECT COUNT(*) AS count
+    FROM information_schema.tables
+    WHERE table_schema = 'main'
+      AND table_name IN ('directors', 'movies', 'reviews')
+  `);
+
+  if (Number(existingTables.rows[0]?.count ?? 0) === 3) {
+    return;
+  }
+
   const statements = SEED_MOVIES_SQL.split(';')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);

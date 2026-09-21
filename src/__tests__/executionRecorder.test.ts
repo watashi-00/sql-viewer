@@ -124,6 +124,18 @@ describe('Execution Recorder', () => {
     await expect(recordQueryExecution(sql)).rejects.toThrow();
   });
 
+  it('should execute CREATE TABLE commands without building a SELECT timeline', async () => {
+    const tableName = 'created_table_command_test';
+    const plan = await recordQueryExecution(`CREATE TABLE ${tableName} (id INTEGER, name VARCHAR)`);
+
+    expect(plan.stages).toEqual([]);
+    expect(plan.events).toEqual([]);
+    expect(plan.finalResult).toEqual([]);
+    expect(plan.columns).toEqual([]);
+
+    await executeQuery(`DROP TABLE ${tableName}`);
+  });
+
   describe('withAlias helper', () => {
     it('should attach alias-prefixed keys alongside original keys', async () => {
       const { withAlias } = await import('../debugger/executionRecorder');

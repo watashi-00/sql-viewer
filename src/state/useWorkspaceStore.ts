@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { DebugState, ExecutionPlan, OperationType, Schema, DataRow } from '../types';
-import { recordQueryExecution } from '../debugger/executionRecorder';
+import { isCreateTableStatement, recordQueryExecution } from '../debugger/executionRecorder';
 import { getIntrospectedSchema, seedMoviesDataset } from '../database/schema';
 import { addHistoryItem } from '../storage/historyStore';
 
@@ -60,8 +60,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   runQuery: async () => {
     set({ debugState: 'running' });
     const startTime = performance.now();
+    const sql = get().sql;
     try {
-      const plan = await recordQueryExecution(get().sql);
+      const plan = await recordQueryExecution(sql);
       const durationMs = performance.now() - startTime;
       set({
         executionPlan: plan,
@@ -71,9 +72,12 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         resultColumns: plan.columns,
         debugState: 'paused',
       });
+      if (isCreateTableStatement(sql)) {
+        await get().loadSchema();
+      }
       await addHistoryItem({
         id: `h-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        sql: get().sql,
+        sql,
         timestamp: Date.now(),
         durationMs,
         rowCount: plan.finalResult.length,
