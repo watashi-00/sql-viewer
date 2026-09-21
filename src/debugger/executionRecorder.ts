@@ -1,6 +1,6 @@
 import { executeQuery } from '../database/duckdb';
 import { extractPipelineStages, extractPredicateTree } from '../parser/sqlParser';
-import { ExecutionEvent, ExecutionPlan, DataRow } from '../types';
+import { ExecutionEvent, ExecutionPlan, DataRow, JoinMatch } from '../types';
 
 /**
  * Maps rows to include keys prefixed by table alias as well as unaliased keys.
@@ -162,18 +162,170 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     const durationMs = measureDuration(startJoin);
     currentRelation = joinRows;
 
-    const joinDesc = joinPredicate
-      ? `Joined relation on predicate '${joinPredicate}'. Produced ${currentRelation.length} matching rows.`
-      : `Joined relation '${joinTarget}'. Produced ${currentRelation.length} matching rows.`;
+    // Build tuple match pairs between left relation and right relation
+    let leftRows: DataRow[] = [];
+    try {
+      const leftRes = await executeQuery(`SELECT * FROM ${baseTable}`);
+      leftRows = leftRes.rows;
+    } catch {
+      leftRows = prevRelation;
+    }
+
+    const rightMatch = fromJoinClause.match(
+      /\b(?:LEFT|RIGHT|INNER|OUTER|CROSS|FULL|NATURAL|,)?\s*JOIN\s+([a-zA-Z0-9_]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?/i
+    );
+    const rightTable = rightMatch ? rightMatch[1] : (joinTarget.split(/\s+/)[0] || 'reviews');
+    const rightAlias = rightMatch && rightMatch[2] ? rightMatch[2] : rightTable;
+
+    let rightRows: DataRow[] = [];
+    try {
+      const rightRes = await executeQuery(`SELECT * FROM ${rightTable}`);
+      rightRows = rightRes.rows;
+    } catch {
+      rightRows = [];
+    }
+
+    // Determine join predicate columns
+    let leftCol: string | null = null;
+    let rightCol: string | null = null;
+    let literalVal: RowValue | null = null;
+    let literalSide: 'left' | 'right' | null = null;
+
+    if (joinPredicate) {
+      const eqMatch = joinPredicate.match(/([a-zA-Z0-9_.]+)\s*=\s*([a-zA-Z0-9_.]+)/);
+      if (eqMatch) {
+        const parseSide = (expr: string) => {
+          const trimmed = expr.trim();
+          const dotIdx = trimmed.indexOf('.');
+          if (dotIdx !== -1) {
+            return { qualifier: trimmed.slice(0, dotIdx), col: trimmed.slice(dotIdx + 1) };
+          }
+          return { qualifier: null, col: trimmed };
+        };
+
+        const side1 = parseSide(eqMatch[1]);
+        const side2 = parseSide(eqMatch[2]);
+        const isLit1 = /^[0-9]+$|^'[^']*'$/.test(side1.col);
+        const isLit2 = /^[0-9]+$|^'[^']*'$/.test(side2.col);
+
+        if (isLit2) {
+          const valStr = side2.col.replace(/^'|'$/g, '');
+          literalVal = isNaN(Number(valStr)) ? valStr : Number(valStr);
+          if (side1.qualifier === baseAlias || side1.qualifier === baseTable) {
+            leftCol = side1.col;
+            literalSide = 'left';
+          } else {
+            rightCol = side1.col;
+            literalSide = 'right';
+          }
+        } else if (isLit1) {
+          const valStr = side1.col.replace(/^'|'$/g, '');
+          literalVal = isNaN(Number(valStr)) ? valStr : Number(valStr);
+          if (side2.qualifier === baseAlias || side2.qualifier === baseTable) {
+            leftCol = side2.col;
+            literalSide = 'left';
+          } else {
+            rightCol = side2.col;
+            literalSide = 'right';
+          }
+        } else {
+          if (side1.qualifier && (side1.qualifier === baseAlias || side1.qualifier === baseTable)) {
+            leftCol = side1.col;
+            rightCol = side2.col;
+          } else if (side2.qualifier && (side2.qualifier === baseAlias || side2.qualifier === baseTable)) {
+            leftCol = side2.col;
+            rightCol = side1.col;
+          } else if (side1.qualifier && (side1.qualifier === rightAlias || side1.qualifier === rightTable)) {
+            rightCol = side1.col;
+            leftCol = side2.col;
+          } else if (side2.qualifier && (side2.qualifier === rightAlias || side2.qualifier === rightTable)) {
+            rightCol = side2.col;
+            leftCol = side1.col;
+          } else {
+            const sampleLeft = leftRows[0] || {};
+            const sampleRight = rightRows[0] || {};
+            if (side1.col in sampleLeft && side2.col in sampleRight) {
+              leftCol = side1.col;
+              rightCol = side2.col;
+            } else if (side2.col in sampleLeft && side1.col in sampleRight) {
+              leftCol = side2.col;
+              rightCol = side1.col;
+            }
+          }
+        }
+      }
+    }
+
+    if (!leftCol || !rightCol) {
+      const sampleLeft = leftRows[0] || {};
+      const sampleRight = rightRows[0] || {};
+      const commonCols = Object.keys(sampleLeft).filter((k) => k in sampleRight && !k.includes('.'));
+      if (commonCols.length > 0) {
+        leftCol = commonCols[0];
+        rightCol = commonCols[0];
+      } else if ('movie_id' in sampleLeft && 'movie_id' in sampleRight) {
+        leftCol = 'movie_id';
+        rightCol = 'movie_id';
+      }
+    }
+
+    const isCrossJoin = !joinPredicate && cleanSql.toUpperCase().includes('CROSS JOIN');
+    const joinMatches: JoinMatch[] = [];
+    const matchedLeftIndices = new Set<number>();
+    const matchedRightIndices = new Set<number>();
+
+    leftRows.forEach((lRow, lIdx) => {
+      rightRows.forEach((rRow, rIdx) => {
+        let isMatch = false;
+        if (isCrossJoin) {
+          isMatch = true;
+        } else if (literalSide === 'left' && leftCol) {
+          const lVal = lRow[leftCol] ?? lRow[`${baseAlias}.${leftCol}`];
+          isMatch = lVal === literalVal;
+        } else if (literalSide === 'right' && rightCol) {
+          const rVal = rRow[rightCol] ?? rRow[`${rightAlias}.${rightCol}`];
+          isMatch = rVal === literalVal;
+        } else if (leftCol && rightCol) {
+          const lVal = lRow[leftCol] ?? lRow[`${baseAlias}.${leftCol}`];
+          const rVal = rRow[rightCol] ?? rRow[`${rightAlias}.${rightCol}`];
+          if (lVal !== undefined && lVal !== null && rVal !== undefined && rVal !== null && lVal === rVal) {
+            isMatch = true;
+          }
+        } else if (lRow.movie_id !== undefined && rRow.movie_id !== undefined && lRow.movie_id === rRow.movie_id) {
+          isMatch = true;
+        }
+
+        if (isMatch) {
+          matchedLeftIndices.add(lIdx);
+          matchedRightIndices.add(rIdx);
+          joinMatches.push({
+            leftRowId: lIdx + 1,
+            rightRowId: rIdx + 1,
+            isMatch: true,
+            leftValues: lRow,
+            rightValues: rRow,
+            joinPredicate:
+              joinPredicate ||
+              `${rightAlias || rightTable}.${rightCol || 'movie_id'} = ${baseAlias || baseTable}.${leftCol || 'movie_id'}`,
+          });
+        }
+      });
+    });
+
+    const unmatchedLeftRows = leftRows.filter((_, idx) => !matchedLeftIndices.has(idx));
+    const unmatchedRightRows = rightRows.filter((_, idx) => !matchedRightIndices.has(idx));
 
     events.push({
       id: 'event-join',
       stage: 'JOIN',
       stageIndex: events.length,
       title: 'JOIN Operation',
-      description: joinDesc,
+      description: `Joined '${baseTable}' and '${rightTable}' on predicate. Produced ${currentRelation.length} matching tuples.`,
       inputRows: prevRelation,
       outputRows: [...currentRelation],
+      joinMatches,
+      unmatchedLeftRows,
+      unmatchedRightRows,
       durationMs,
     });
   }

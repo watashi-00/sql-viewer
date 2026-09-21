@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { recordQueryExecution } from '../debugger/executionRecorder';
 import { seedMoviesDataset } from '../database/schema';
-import { resetDatabase } from '../database/duckdb';
+import { resetDatabase, executeQuery } from '../database/duckdb';
 
 describe('Execution Recorder', () => {
   beforeAll(async () => {
@@ -37,6 +37,8 @@ describe('Execution Recorder', () => {
     expect(joinEvent).toBeDefined();
     expect(joinEvent?.inputRows.length).toBe(5);
     expect(joinEvent?.outputRows.length).toBe(8); // 8 reviews joined with movies
+    expect(joinEvent?.joinMatches).toBeDefined();
+    expect(joinEvent?.joinMatches?.length).toBe(8);
 
     // Verify WHERE event
     const whereEvent = plan.events.find((e) => e.stage === 'WHERE');
@@ -127,6 +129,69 @@ describe('Execution Recorder', () => {
       const rows = [{ id: 1, name: 'Inception' }];
       const result = withAlias(rows, '');
       expect(result).toBe(rows);
+    });
+  });
+
+  describe('Phase 2 JOIN Recording', () => {
+    beforeAll(async () => {
+      await resetDatabase();
+      await seedMoviesDataset();
+    });
+
+    it('should record join tuple matches and predicate information', async () => {
+      const sql = `
+        SELECT m.title, r.score
+        FROM movies m
+        JOIN reviews r ON r.movie_id = m.movie_id
+      `;
+      const plan = await recordQueryExecution(sql);
+      const joinEvent = plan.events.find((e) => e.stage === 'JOIN');
+
+      expect(joinEvent).toBeDefined();
+      expect(joinEvent?.joinMatches).toBeDefined();
+      expect(joinEvent?.joinMatches!.length).toBeGreaterThan(0);
+      expect(joinEvent?.joinMatches![0].isMatch).toBe(true);
+      expect(joinEvent?.joinMatches![0].joinPredicate).toBe('r.movie_id = m.movie_id');
+    });
+
+    it('should record unmatched rows for LEFT JOIN with non-matching left tuple', async () => {
+      await executeQuery(
+        `INSERT INTO movies (movie_id, title, genre, year, director_id) VALUES (99, 'Unreviewed Film', 'Drama', 2024, 1)`
+      );
+      try {
+        const sql = `
+          SELECT m.title, r.score
+          FROM movies m
+          LEFT JOIN reviews r ON r.movie_id = m.movie_id
+        `;
+        const plan = await recordQueryExecution(sql);
+        const joinEvent = plan.events.find((e) => e.stage === 'JOIN');
+        expect(joinEvent).toBeDefined();
+        expect(joinEvent?.joinMatches).toBeDefined();
+        expect(joinEvent?.joinMatches!.length).toBe(8);
+        expect(joinEvent?.unmatchedLeftRows).toBeDefined();
+        expect(joinEvent?.unmatchedLeftRows?.length).toBe(1);
+        expect(joinEvent?.unmatchedLeftRows?.[0].title).toBe('Unreviewed Film');
+        expect(joinEvent?.unmatchedRightRows).toBeDefined();
+        expect(joinEvent?.unmatchedRightRows?.length).toBe(0);
+      } finally {
+        await executeQuery(`DELETE FROM movies WHERE movie_id = 99`);
+      }
+    });
+
+    it('should record unmatched rows when predicate matches nothing in outer join', async () => {
+      const sql = `
+        SELECT m.title, r.score
+        FROM movies m
+        LEFT JOIN reviews r ON r.movie_id = 999
+      `;
+      const plan = await recordQueryExecution(sql);
+      const joinEvent = plan.events.find((e) => e.stage === 'JOIN');
+      expect(joinEvent).toBeDefined();
+      expect(joinEvent?.joinMatches).toBeDefined();
+      expect(joinEvent?.joinMatches!.length).toBe(0);
+      expect(joinEvent?.unmatchedLeftRows?.length).toBe(5);
+      expect(joinEvent?.unmatchedRightRows?.length).toBe(8);
     });
   });
 });
