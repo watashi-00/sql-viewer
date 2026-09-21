@@ -322,17 +322,11 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
           : String(cte.name);
 
       let cteSql = '';
-      const regex = new RegExp(`\\b${aliasName}\\s+AS\\s*\\(([\\s\\S]*?)\\)(?:\\s*,|\\s*SELECT|\\s*WITH|$)`, 'i');
-      const m = sql.match(regex);
-      if (m) {
-        cteSql = m[1].trim();
-      } else {
-        try {
-          const innerAst = cte.stmt?.ast || cte.stmt;
-          cteSql = parser.sqlify(innerAst).replace(/`/g, '');
-        } catch {
-          cteSql = '';
-        }
+      try {
+        const innerAst = cte.stmt?.ast || cte.stmt;
+        cteSql = parser.sqlify(innerAst).replace(/`/g, '');
+      } catch {
+        cteSql = '';
       }
 
       // Record CTE execution recursively

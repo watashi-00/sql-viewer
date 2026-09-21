@@ -437,9 +437,29 @@ describe('Execution Recorder', () => {
 
       expect(plan.cteScopes).toBeDefined();
       expect(plan.cteScopes?.length).toBe(1);
-      expect(plan.cteScopes![0].aliasName).toBe('top_movies');
-      expect(plan.cteScopes![0].outputRows.length).toBeGreaterThan(0);
-      expect(plan.cteScopes![0].events.length).toBeGreaterThan(0);
+
+      const cteScope = plan.cteScopes![0];
+      expect(cteScope.aliasName).toBe('top_movies');
+      expect(cteScope.outputRows.length).toBe(4);
+
+      // Explicit assertions for cteScopes[0].events stages
+      const events = cteScope.events;
+      expect(events.map((e) => e.stage)).toEqual(['FROM', 'WHERE', 'SELECT']);
+
+      const fromEvent = events.find((e) => e.stage === 'FROM');
+      expect(fromEvent).toBeDefined();
+      expect(fromEvent?.inputRows).toEqual([]);
+      expect(fromEvent?.outputRows.length).toBe(5);
+
+      const whereEvent = events.find((e) => e.stage === 'WHERE');
+      expect(whereEvent).toBeDefined();
+      expect(whereEvent?.inputRows.length).toBe(5);
+      expect(whereEvent?.outputRows.length).toBe(4);
+
+      const selectEvent = events.find((e) => e.stage === 'SELECT');
+      expect(selectEvent).toBeDefined();
+      expect(selectEvent?.inputRows.length).toBe(4);
+      expect(selectEvent?.outputRows.length).toBe(4);
     });
 
     it('should record multiple CTE scopes in query execution plan', async () => {
@@ -458,10 +478,22 @@ describe('Execution Recorder', () => {
 
       expect(plan.cteScopes).toBeDefined();
       expect(plan.cteScopes?.length).toBe(2);
-      expect(plan.cteScopes![0].aliasName).toBe('top_movies');
-      expect(plan.cteScopes![1].aliasName).toBe('high_reviews');
-      expect(plan.cteScopes![0].outputRows.length).toBeGreaterThan(0);
-      expect(plan.cteScopes![1].outputRows.length).toBeGreaterThan(0);
+
+      const scope0 = plan.cteScopes![0];
+      expect(scope0.aliasName).toBe('top_movies');
+      expect(scope0.outputRows.length).toBe(4);
+      expect(scope0.events.map((e) => e.stage)).toEqual(['FROM', 'WHERE', 'SELECT']);
+      const scope0Where = scope0.events.find((e) => e.stage === 'WHERE');
+      expect(scope0Where?.inputRows.length).toBe(5);
+      expect(scope0Where?.outputRows.length).toBe(4);
+
+      const scope1 = plan.cteScopes![1];
+      expect(scope1.aliasName).toBe('high_reviews');
+      expect(scope1.outputRows.length).toBe(7);
+      expect(scope1.events.map((e) => e.stage)).toEqual(['FROM', 'WHERE', 'SELECT']);
+      const scope1Where = scope1.events.find((e) => e.stage === 'WHERE');
+      expect(scope1Where?.inputRows.length).toBe(8);
+      expect(scope1Where?.outputRows.length).toBe(7);
     });
   });
 });
