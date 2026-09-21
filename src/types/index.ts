@@ -59,6 +59,23 @@ export interface JoinMatch {
   isMatch: boolean;
   leftValues: DataRow;
   rightValues: DataRow;
+  joinPredicate?: string;
+}
+
+export interface GroupAggregateCalc {
+  funcName: 'AVG' | 'SUM' | 'COUNT' | 'MIN' | 'MAX';
+  expression: string;
+  inputValues: RowValue[];
+  formulaStep: string;
+  finalValue: RowValue;
+}
+
+export interface GroupBucket {
+  groupKey: string;
+  rows: DataRow[];
+  aggregates: GroupAggregateCalc[];
+  havingPassed?: boolean;
+  havingPredicate?: string;
 }
 
 export interface ExecutionEvent {
@@ -72,8 +89,11 @@ export interface ExecutionEvent {
   rejectedRows?: DataRow[];
   predicateTree?: PredicateNode;
   joinMatches?: JoinMatch[];
-  groupBuckets?: Array<{ key: string; rows: DataRow[]; aggregateResult?: Record<string, RowValue> }>;
-  removedDuplicatesCount?: number;
+  unmatchedLeftRows?: DataRow[];
+  unmatchedRightRows?: DataRow[];
+  groupBuckets?: GroupBucket[];
+  rejectedGroupBuckets?: GroupBucket[];
+  distinctDuplicatesRemoved?: number;
   durationMs?: number;
 }
 

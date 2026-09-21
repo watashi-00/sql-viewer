@@ -9,10 +9,11 @@ import {
   DataRow,
   PredicateNode,
   JoinMatch,
+  GroupBucket,
+  GroupAggregateCalc,
   ExecutionEvent,
   ExecutionPlan,
 } from '../types';
-import '../types';
 
 describe('Types sanity check', () => {
   it('should define valid operation types', () => {
@@ -168,3 +169,55 @@ describe('Types sanity check', () => {
     expect(plan.finalResult).toHaveLength(1);
   });
 });
+
+describe('Phase 2 Types', () => {
+  it('should instantiate JoinMatch and GroupBucket interfaces', () => {
+    const match: JoinMatch = {
+      leftRowId: 1,
+      rightRowId: 1,
+      isMatch: true,
+      leftValues: { movie_id: 1, title: 'Inception' },
+      rightValues: { review_id: 10, movie_id: 1, score: 9 },
+      joinPredicate: 'r.movie_id = m.movie_id'
+    };
+
+    const calc: GroupAggregateCalc = {
+      funcName: 'AVG',
+      expression: 'r.score',
+      inputValues: [9, 8],
+      formulaStep: '(9 + 8) / 2',
+      finalValue: 8.5
+    };
+
+    const bucket: GroupBucket = {
+      groupKey: 'Inception',
+      rows: [match.leftValues],
+      aggregates: [calc],
+      havingPassed: true,
+      havingPredicate: 'AVG(r.score) >= 8'
+    };
+
+    const event: ExecutionEvent = {
+      id: 'event-1',
+      stage: 'GROUP BY',
+      stageIndex: 3,
+      title: 'Group by title',
+      description: 'Grouped rows',
+      inputRows: [match.leftValues],
+      outputRows: [match.leftValues],
+      joinMatches: [match],
+      unmatchedLeftRows: [],
+      unmatchedRightRows: [],
+      groupBuckets: [bucket],
+      rejectedGroupBuckets: [],
+      distinctDuplicatesRemoved: 0
+    };
+
+    expect(match.isMatch).toBe(true);
+    expect(match.joinPredicate).toBe('r.movie_id = m.movie_id');
+    expect(bucket.aggregates[0].finalValue).toBe(8.5);
+    expect(event.groupBuckets).toHaveLength(1);
+    expect(event.groupBuckets![0].aggregates[0].funcName).toBe('AVG');
+  });
+});
+
