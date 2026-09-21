@@ -135,3 +135,67 @@ export interface ExecutionPlan {
   explainTree?: ExplainNode;
 }
 
+export type ExportFormat = 'csv' | 'json' | 'parquet';
+
+export interface CustomFileImport {
+  tableName: string;
+  fileName: string;
+  fileSize: number;
+  format: 'csv' | 'json' | 'parquet';
+  rowCount: number;
+  columns: ColumnMeta[];
+}
+
+export interface QueryHistoryItem {
+  id: string;
+  sql: string;
+  timestamp: number;
+  durationMs: number;
+  rowCount: number;
+  status: 'success' | 'error';
+  errorMessage?: string;
+  isFavorite?: boolean;
+  tags?: string[];
+}
+
+export interface SavedSnippet {
+  id: string;
+  title: string;
+  sql: string;
+  description?: string;
+  tags: string[];
+  createdAt: number;
+}
+
+export interface VisualQueryNode {
+  id: string;
+  tableName: string;
+  selectedColumns: string[];
+  alias?: string;
+  position: { x: number; y: number };
+}
+
+export interface VisualJoinEdge {
+  id: string;
+  leftTable: string;
+  leftColumn: string;
+  rightTable: string;
+  rightColumn: string;
+  joinType: 'INNER' | 'LEFT' | 'RIGHT' | 'FULL';
+}
+
+export interface VisualFilterCondition {
+  id: string;
+  table: string;
+  column: string;
+  operator: '=' | '!=' | '>' | '>=' | '<' | '<=' | 'LIKE' | 'IN';
+  value: string;
+}
+
+export interface VisualQueryState {
+  nodes: VisualQueryNode[];
+  joins: VisualJoinEdge[];
+  filters: VisualFilterCondition[];
+  limit?: number;
+}
+

@@ -16,6 +16,11 @@ import {
   SubqueryResolution,
   CteScope,
   ExplainNode,
+  CustomFileImport,
+  QueryHistoryItem,
+  SavedSnippet,
+  VisualQueryState,
+  ExportFormat,
 } from '../types';
 
 describe('Types sanity check', () => {
@@ -265,6 +270,59 @@ describe('Phase 3 Types', () => {
     expect(cte.aliasName).toBe('top_directors');
     expect(plan.cteScopes?.[0].aliasName).toBe('top_directors');
     expect(plan.explainTree?.operatorType).toBe('HASH_JOIN');
+  });
+});
+
+describe('Phase 4 Types', () => {
+  it('should instantiate CustomFileImport, QueryHistoryItem, SavedSnippet, and VisualQueryState', () => {
+    const format: ExportFormat = 'csv';
+
+    const customImport: CustomFileImport = {
+      tableName: 'custom_data',
+      fileName: 'data.csv',
+      fileSize: 1024,
+      format,
+      rowCount: 10,
+      columns: [{ name: 'id', type: 'INTEGER' }]
+    };
+
+    const historyItem: QueryHistoryItem = {
+      id: 'h-100',
+      sql: 'SELECT * FROM custom_data',
+      timestamp: 1700000000,
+      durationMs: 5.5,
+      rowCount: 10,
+      status: 'success',
+      isFavorite: true,
+      tags: ['import']
+    };
+
+    const snippet: SavedSnippet = {
+      id: 's-100',
+      title: 'Count Query',
+      sql: 'SELECT count(*) FROM custom_data',
+      tags: ['aggregate'],
+      createdAt: 1700000000
+    };
+
+    const visualState: VisualQueryState = {
+      nodes: [
+        {
+          id: 'n-1',
+          tableName: 'custom_data',
+          selectedColumns: ['id'],
+          position: { x: 10, y: 20 }
+        }
+      ],
+      joins: [],
+      filters: [],
+      limit: 50
+    };
+
+    expect(customImport.format).toBe('csv');
+    expect(historyItem.status).toBe('success');
+    expect(snippet.title).toBe('Count Query');
+    expect(visualState.nodes[0].tableName).toBe('custom_data');
   });
 });
 
