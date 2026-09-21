@@ -3,6 +3,11 @@ import type { DuckDBBindings, DuckDBConnection as DuckDBBlockingConnection } fro
 import duckdb_wasm from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url';
 import eh_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url';
 import { Schema, TableMeta, ColumnMeta, DataRow, RowValue, CustomFileImport } from '../types';
+import {
+  loadWorkspace,
+  saveWorkspace,
+  PersistedWorkspace,
+} from '../storage/workspaceStore';
 
 export type DuckDBInstance = duckdb.AsyncDuckDB | DuckDBBindings;
 export type DuckDBConnection = duckdb.AsyncDuckDBConnection | DuckDBBlockingConnection;
@@ -10,6 +15,9 @@ export type DuckDBConnection = duckdb.AsyncDuckDBConnection | DuckDBBlockingConn
 let db: DuckDBInstance | null = null;
 let conn: DuckDBConnection | null = null;
 let initPromise: Promise<{ db: DuckDBInstance; conn: DuckDBConnection }> | null = null;
+let workspaceRestored = false;
+let workspaceStateLoaded = false;
+let persistedWorkspace: PersistedWorkspace = { files: [], commands: [] };
 
 const isNodeEnvironment =
   typeof window === 'undefined' ||
@@ -80,6 +88,76 @@ export async function getDuckDB(): Promise<{ db: DuckDBInstance; conn: DuckDBCon
 
 export const initDuckDB = getDuckDB;
 
+async function ensurePersistedWorkspaceLoaded(): Promise<void> {
+  if (workspaceStateLoaded || isNodeEnvironment) return;
+  persistedWorkspace = await loadWorkspace();
+  workspaceStateLoaded = true;
+}
+
+async function tableExists(tableName: string): Promise<boolean> {
+  const escapedTableName = tableName.replace(/'/g, "''");
+  const result = await executeQuery(`
+    SELECT COUNT(*) AS count
+    FROM information_schema.tables
+    WHERE table_schema = 'main' AND table_name = '${escapedTableName}'
+  `);
+  return Number(result.rows[0]?.count ?? 0) > 0;
+}
+
+export async function restoreWorkspace(): Promise<void> {
+  if (isNodeEnvironment || workspaceRestored) return;
+  await ensurePersistedWorkspaceLoaded();
+
+  for (const file of persistedWorkspace.files) {
+    if (!(await tableExists(file.tableName))) {
+      await registerAndLoadFile(file.fileName, file.buffer, file.format, false);
+    }
+  }
+
+  for (const command of persistedWorkspace.commands) {
+    if (!command.tableName || !(await tableExists(command.tableName))) {
+      await executeQuery(command.sql);
+    }
+  }
+
+  workspaceRestored = true;
+}
+
+export async function persistWorkspaceFile(file: {
+  fileName: string;
+  tableName: string;
+  format: 'csv' | 'json' | 'parquet';
+  buffer: Uint8Array;
+}): Promise<void> {
+  if (isNodeEnvironment) return;
+  await ensurePersistedWorkspaceLoaded();
+  persistedWorkspace.files = [
+    ...persistedWorkspace.files.filter((item) => item.tableName !== file.tableName),
+    file,
+  ];
+  persistedWorkspace.commands = persistedWorkspace.commands.filter(
+    (command) => command.tableName !== file.tableName
+  );
+  await saveWorkspace(persistedWorkspace);
+}
+
+export async function persistWorkspaceCommand(sql: string): Promise<void> {
+  if (isNodeEnvironment) return;
+  await ensurePersistedWorkspaceLoaded();
+  const tableMatch = sql.match(
+    /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([a-zA-Z0-9_]+)["`]?/i
+  );
+  const tableName = tableMatch?.[1];
+  if (tableName) {
+    persistedWorkspace.files = persistedWorkspace.files.filter((file) => file.tableName !== tableName);
+  }
+  persistedWorkspace.commands = [
+    ...persistedWorkspace.commands.filter((command) => command.tableName !== tableName),
+    { sql, tableName },
+  ];
+  await saveWorkspace(persistedWorkspace);
+}
+
 export async function executeQuery(sql: string): Promise<{ rows: DataRow[]; columns: string[] }> {
   const { conn: currentConn } = await getDuckDB();
   const arrowResult = await currentConn.query(sql);
@@ -118,6 +196,7 @@ export async function resetDatabase(): Promise<void> {
     db = null;
   }
   initPromise = null;
+  workspaceRestored = false;
   await getDuckDB();
 }
 
@@ -180,7 +259,8 @@ export async function fetchSchema(): Promise<Schema> {
 export async function registerAndLoadFile(
   fileName: string,
   buffer: Uint8Array,
-  format: 'csv' | 'json' | 'parquet'
+  format: 'csv' | 'json' | 'parquet',
+  persist = true
 ): Promise<CustomFileImport> {
   const { db } = await getDuckDB();
 
@@ -188,8 +268,10 @@ export async function registerAndLoadFile(
   const tableName = sanitized || 'custom_table';
   const escapedTableName = tableName.replace(/"/g, '""');
   const escapedFileName = fileName.replace(/'/g, "''");
+  const fileSize = buffer.byteLength;
+  const databaseBuffer = buffer.slice();
 
-  await db.registerFileBuffer(fileName, buffer);
+  await db.registerFileBuffer(fileName, databaseBuffer);
 
   let readFn = 'read_csv_auto';
   if (format === 'json') {
@@ -198,7 +280,7 @@ export async function registerAndLoadFile(
     readFn = 'read_parquet';
   }
 
-  await executeQuery(`CREATE TABLE "${escapedTableName}" AS SELECT * FROM ${readFn}('${escapedFileName}')`);
+  await executeQuery(`CREATE OR REPLACE TABLE "${escapedTableName}" AS SELECT * FROM ${readFn}('${escapedFileName}')`);
 
   const schema = await fetchSchema();
   const tableMeta = schema.tables.find((t) => t.name === tableName);
@@ -206,10 +288,14 @@ export async function registerAndLoadFile(
   const columns = tableMeta ? tableMeta.columns : [];
   const rowCount = tableMeta?.rowCount ?? 0;
 
+  if (persist) {
+    await persistWorkspaceFile({ fileName, tableName, format, buffer });
+  }
+
   return {
     tableName,
     fileName,
-    fileSize: buffer.byteLength,
+    fileSize,
     format,
     rowCount,
     columns,

@@ -1,5 +1,5 @@
 import { Parser } from 'node-sql-parser';
-import { executeQuery } from '../database/duckdb';
+import { executeQuery, persistWorkspaceCommand } from '../database/duckdb';
 import { extractPipelineStages, extractPredicateTree, parseQueryAST } from '../parser/sqlParser';
 import {
   ExecutionEvent,
@@ -683,6 +683,7 @@ export function isCreateTableStatement(sql: string): boolean {
 export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> {
   if (isCreateTableStatement(sql)) {
     await executeQuery(sql);
+    await persistWorkspaceCommand(sql);
     return {
       query: sql,
       stages: [],

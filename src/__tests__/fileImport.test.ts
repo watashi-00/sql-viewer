@@ -40,6 +40,8 @@ describe('Custom Data File Import', () => {
     const result = await registerAndLoadFile('students.csv', buffer, 'csv');
 
     expect(result.tableName).toBe('students');
+    expect(result.fileSize).toBe(buffer.byteLength);
+    expect(buffer.byteLength).toBeGreaterThan(0);
     expect(result.rowCount).toBe(2);
     expect(result.columns.map((c) => c.name)).toEqual(['id', 'name', 'score']);
   });
@@ -55,6 +57,16 @@ describe('Custom Data File Import', () => {
     expect(result.rowCount).toBe(2);
     expect(result.columns.map((c) => c.name)).toContain('product');
     expect(result.columns.map((c) => c.name)).toContain('price');
+  });
+
+  it('should replace an existing table when the same file is imported again', async () => {
+    const encoder = new TextEncoder();
+    await registerAndLoadFile('clients.json', encoder.encode('{"id":1}'), 'json');
+
+    const result = await registerAndLoadFile('clients.json', encoder.encode('{"id":2}\n{"id":3}'), 'json');
+
+    expect(result.tableName).toBe('clients');
+    expect(result.rowCount).toBe(2);
   });
 
   it('should sanitize table names with special characters and dashes', async () => {

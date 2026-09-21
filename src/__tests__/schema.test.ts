@@ -26,6 +26,14 @@ describe('Schema & Seed Dataset', () => {
     expect(schema.tables.find((table) => table.name === 'movies')?.rowCount).toBe(5);
   });
 
+  it('should serialize concurrent seed calls', async () => {
+    await resetDatabase();
+    await expect(Promise.all([seedMoviesDataset(), seedMoviesDataset()])).resolves.toHaveLength(2);
+
+    const schema = await getIntrospectedSchema();
+    expect(schema.tables.filter((table) => ['directors', 'movies', 'reviews'].includes(table.name))).toHaveLength(3);
+  });
+
   it('should introspect foreign keys and relations correctly', async () => {
     const schema = await getIntrospectedSchema();
     const moviesTable = schema.tables.find((t) => t.name === 'movies');
