@@ -1,4 +1,4 @@
-import { executeQuery } from './duckdb';
+import { executeQuery, restoreWorkspace } from './duckdb';
 import { SEED_MOVIES_SQL } from '../datasets/movies';
 import { Schema, TableMeta, ColumnMeta } from '../types';
 
@@ -11,6 +11,7 @@ export async function seedMoviesDataset(): Promise<void> {
   `);
 
   if (Number(existingTables.rows[0]?.count ?? 0) === 3) {
+    await restoreWorkspace();
     return;
   }
 
@@ -20,6 +21,8 @@ export async function seedMoviesDataset(): Promise<void> {
   for (const sql of statements) {
     await executeQuery(sql);
   }
+
+  await restoreWorkspace();
 }
 
 export async function getIntrospectedSchema(): Promise<Schema> {
