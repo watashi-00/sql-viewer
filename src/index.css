@@ -81,9 +81,11 @@
   background-color: rgb(var(--color-surface-secondary)) !important;
 }
 
-:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='text-[#7C9CFF]'],
-:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='bg-[#7C9CFF]'] {
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='text-[#7C9CFF]'] {
   color: rgb(var(--color-accent)) !important;
+}
+
+:where([data-theme='light'], [data-theme='noir'], [data-theme='ocean']) [class~='bg-[#7C9CFF]'] {
   background-color: rgb(var(--color-accent));
 }
 
