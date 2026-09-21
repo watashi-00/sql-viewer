@@ -97,4 +97,36 @@ describe('DuckDB Service', () => {
     // After reset, the temporary table should no longer exist
     await expect(executeQuery('SELECT * FROM temp_table')).rejects.toThrow();
   });
+
+  it('should prevent duplicate initialization on concurrent getDuckDB calls', async () => {
+    const [res1, res2, res3] = await Promise.all([
+      getDuckDB(),
+      getDuckDB(),
+      getDuckDB(),
+    ]);
+
+    expect(res1.db).toBe(res2.db);
+    expect(res2.db).toBe(res3.db);
+    expect(res1.conn).toBe(res2.conn);
+    expect(res2.conn).toBe(res3.conn);
+  });
+
+  it('should handle table names with special characters and quotes in fetchSchema', async () => {
+    await executeQuery('CREATE TABLE "user\'s ""special"" table" (id INTEGER, "full name" VARCHAR NOT NULL)');
+    await executeQuery('INSERT INTO "user\'s ""special"" table" VALUES (1, \'test\')');
+
+    const schema = await fetchSchema();
+    const specialTable = schema.tables.find((t) => t.name === 'user\'s "special" table');
+    expect(specialTable).toBeDefined();
+    expect(specialTable?.name).toBe('user\'s "special" table');
+    expect(specialTable?.rowCount).toBe(1);
+    expect(specialTable?.schema).toBe('main');
+
+    const colNames = specialTable?.columns.map((c) => c.name);
+    expect(colNames).toContain('id');
+    expect(colNames).toContain('full name');
+
+    const fullNameCol = specialTable?.columns.find((c) => c.name === 'full name');
+    expect(fullNameCol?.isNullable).toBe(false);
+  });
 });
