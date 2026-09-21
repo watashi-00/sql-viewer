@@ -1,7 +1,7 @@
 import * as duckdb from '@duckdb/duckdb-wasm';
 import type { DuckDBBindings, DuckDBConnection as DuckDBBlockingConnection } from '@duckdb/duckdb-wasm/blocking';
-import duckdb_wasm from '@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url';
-import mvp_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url';
+import duckdb_wasm from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url';
+import eh_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url';
 import { Schema, TableMeta, ColumnMeta, DataRow, RowValue, CustomFileImport } from '../types';
 
 export type DuckDBInstance = duckdb.AsyncDuckDB | DuckDBBindings;
@@ -44,18 +44,10 @@ async function initNodeDuckDB(): Promise<{ db: DuckDBBindings; conn: DuckDBBlock
 }
 
 async function initBrowserDuckDB(): Promise<{ db: duckdb.AsyncDuckDB; conn: duckdb.AsyncDuckDBConnection }> {
-  const DUCKDB_BUNDLES: duckdb.DuckDBBundles = {
-    mvp: {
-      mainModule: duckdb_wasm,
-      mainWorker: mvp_worker,
-    },
-  };
-
-  const bundle = await duckdb.selectBundle(DUCKDB_BUNDLES);
-  const worker = new Worker(bundle.mainWorker!);
+  const worker = new Worker(eh_worker);
   const logger = new duckdb.ConsoleLogger();
   const browserDb = new duckdb.AsyncDuckDB(logger, worker);
-  await browserDb.instantiate(bundle.mainModule, bundle.pthreadWorker);
+  await browserDb.instantiate(duckdb_wasm);
   const browserConn = await browserDb.connect();
   return { db: browserDb, conn: browserConn };
 }
