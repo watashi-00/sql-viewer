@@ -10,6 +10,7 @@ import {
   GroupBucket,
   GroupAggregateCalc,
   CteScope,
+  SubqueryResolution,
 } from '../types';
 
 export interface AggregateDefinition {
@@ -226,6 +227,175 @@ function measureDuration(startTime: number): number {
 }
 
 /**
+ * Helper to find the index of a top-level keyword outside parenthesis depth.
+ */
+function findTopLevelKeywordPos(sql: string, keywordRegex: RegExp, startFrom: number = 0): number {
+  let depth = 0;
+  let inQuote = false;
+  let quoteChar = '';
+
+  for (let i = startFrom; i < sql.length; i++) {
+    const char = sql[i];
+    if (inQuote) {
+      if (char === quoteChar && sql[i - 1] !== '\\') {
+        inQuote = false;
+      }
+    } else {
+      if (char === "'" || char === '"') {
+        inQuote = true;
+        quoteChar = char;
+      } else if (char === '(') {
+        depth++;
+      } else if (char === ')') {
+        depth--;
+      } else if (depth === 0) {
+        const slice = sql.slice(i);
+        const match = slice.match(keywordRegex);
+        if (match && match.index === 0) {
+          return i;
+        }
+      }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Parses subquery expressions from clause text.
+ */
+export function parseSubqueriesFromText(
+  text: string,
+  parentClause: 'WHERE' | 'HAVING' | 'SELECT'
+): Array<{
+  id: string;
+  type: 'scalar' | 'set' | 'exists';
+  rawQuery: string;
+  parentClause: 'WHERE' | 'HAVING' | 'SELECT';
+}> {
+  const results: Array<{
+    id: string;
+    type: 'scalar' | 'set' | 'exists';
+    rawQuery: string;
+    parentClause: 'WHERE' | 'HAVING' | 'SELECT';
+  }> = [];
+
+  if (!text) return results;
+
+  const regex = /\(\s*SELECT\b/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    const startParenIdx = match.index;
+    const selectIdx = startParenIdx + match[0].indexOf('SELECT');
+
+    let depth = 0;
+    let endParenIdx = -1;
+    let inQuote = false;
+    let quoteChar = '';
+
+    for (let i = startParenIdx; i < text.length; i++) {
+      const char = text[i];
+      if (inQuote) {
+        if (char === quoteChar && text[i - 1] !== '\\') {
+          inQuote = false;
+        }
+      } else {
+        if (char === "'" || char === '"') {
+          inQuote = true;
+          quoteChar = char;
+        } else if (char === '(') {
+          depth++;
+        } else if (char === ')') {
+          depth--;
+          if (depth === 0) {
+            endParenIdx = i;
+            break;
+          }
+        }
+      }
+    }
+
+    if (endParenIdx === -1) continue;
+
+    const rawQuery = text.substring(selectIdx, endParenIdx).trim();
+
+    const prefix = text.substring(0, startParenIdx).trim();
+    let type: 'scalar' | 'set' | 'exists' = 'scalar';
+
+    if (/\bIN\s*$/i.test(prefix) || /\bNOT\s+IN\s*$/i.test(prefix)) {
+      type = 'set';
+    } else if (/\bEXISTS\s*$/i.test(prefix) || /\bNOT\s+EXISTS\s*$/i.test(prefix)) {
+      type = 'exists';
+    } else {
+      type = 'scalar';
+    }
+
+    const id = `subquery-${parentClause.toLowerCase()}-${results.length + 1}`;
+
+    results.push({
+      id,
+      type,
+      rawQuery,
+      parentClause,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Executes extracted subqueries on DuckDB WASM and builds SubqueryResolution objects.
+ */
+export async function extractAndResolveSubqueries(
+  clauseText: string,
+  parentClause: 'WHERE' | 'HAVING' | 'SELECT'
+): Promise<SubqueryResolution[]> {
+  const parsed = parseSubqueriesFromText(clauseText, parentClause);
+  const resolutions: SubqueryResolution[] = [];
+
+  for (const sub of parsed) {
+    const resolution: SubqueryResolution = {
+      id: sub.id,
+      type: sub.type,
+      rawQuery: sub.rawQuery,
+      parentClause: sub.parentClause,
+    };
+
+    try {
+      const res = await executeQuery(sub.rawQuery);
+      if (sub.type === 'set') {
+        resolution.resolvedSet = res.rows.map((row) => {
+          const keys = Object.keys(row);
+          return keys.length > 0 ? row[keys[0]] : null;
+        });
+      } else if (sub.type === 'scalar') {
+        if (res.rows.length > 0) {
+          const firstRow = res.rows[0];
+          const keys = Object.keys(firstRow);
+          resolution.resolvedValue = keys.length > 0 ? firstRow[keys[0]] : null;
+        } else {
+          resolution.resolvedValue = null;
+        }
+      } else if (sub.type === 'exists') {
+        resolution.existsResult = res.rows.length > 0;
+      }
+    } catch (_err) {
+      if (sub.type === 'set') {
+        resolution.resolvedSet = [];
+      } else if (sub.type === 'scalar') {
+        resolution.resolvedValue = null;
+      } else if (sub.type === 'exists') {
+        resolution.existsResult = false;
+      }
+    }
+
+    resolutions.push(resolution);
+  }
+
+  return resolutions;
+}
+
+/**
  * Extracts individual query clauses for prefix query construction and descriptions.
  */
 function extractClauses(sql: string) {
@@ -236,11 +406,21 @@ function extractClauses(sql: string) {
     cleanSql = withMatch[1].trim();
   }
 
-  // Extract FROM ... clause up to WHERE, GROUP BY, HAVING, ORDER BY, LIMIT
-  const fromJoinMatch = cleanSql.match(
-    /\bFROM\s+([\s\S]*?)(?:\bWHERE\b|\bGROUP\s+BY\b|\bHAVING\b|\bORDER\s+BY\b|\bLIMIT\b|$)/i
-  );
-  const fromJoinClause = fromJoinMatch ? fromJoinMatch[1].trim() : 'movies';
+  const fromPos = findTopLevelKeywordPos(cleanSql, /^\bFROM\b/i);
+  const wherePos = findTopLevelKeywordPos(cleanSql, /^\bWHERE\b/i);
+  const groupPos = findTopLevelKeywordPos(cleanSql, /^\bGROUP\s+BY\b/i);
+  const havingPos = findTopLevelKeywordPos(cleanSql, /^\bHAVING\b/i);
+  const orderPos = findTopLevelKeywordPos(cleanSql, /^\bORDER\s+BY\b/i);
+  const limitPos = findTopLevelKeywordPos(cleanSql, /^\bLIMIT\b/i);
+
+  // FROM clause
+  let fromJoinClause = 'movies';
+  if (fromPos !== -1) {
+    const endFrom = [wherePos, groupPos, havingPos, orderPos, limitPos]
+      .filter((p) => p > fromPos)
+      .reduce((min, p) => (min === -1 || p < min ? p : min), -1);
+    fromJoinClause = (endFrom !== -1 ? cleanSql.slice(fromPos + 4, endFrom) : cleanSql.slice(fromPos + 4)).trim();
+  }
 
   // Base table and alias
   let baseTable = 'movies';
@@ -261,32 +441,53 @@ function extractClauses(sql: string) {
   const joinPredicate = joinMatch && joinMatch[2] ? joinMatch[2].trim() : '';
 
   // WHERE clause
-  const whereMatch = cleanSql.match(
-    /\bWHERE\s+([\s\S]*?)(?:\bGROUP\s+BY\b|\bHAVING\b|\bORDER\s+BY\b|\bLIMIT\b|$)/i
-  );
-  const whereClause = whereMatch ? whereMatch[1].trim() : '';
+  let whereClause = '';
+  if (wherePos !== -1) {
+    const endWhere = [groupPos, havingPos, orderPos, limitPos]
+      .filter((p) => p > wherePos)
+      .reduce((min, p) => (min === -1 || p < min ? p : min), -1);
+    whereClause = (endWhere !== -1 ? cleanSql.slice(wherePos + 5, endWhere) : cleanSql.slice(wherePos + 5)).trim();
+  }
 
   // GROUP BY clause
-  const groupByMatch = cleanSql.match(
-    /\bGROUP\s+BY\s+([\s\S]*?)(?:\bHAVING\b|\bORDER\s+BY\b|\bLIMIT\b|$)/i
-  );
-  const groupByClause = groupByMatch ? groupByMatch[1].trim() : '';
+  let groupByClause = '';
+  if (groupPos !== -1) {
+    const endGroup = [havingPos, orderPos, limitPos]
+      .filter((p) => p > groupPos)
+      .reduce((min, p) => (min === -1 || p < min ? p : min), -1);
+    groupByClause = (endGroup !== -1 ? cleanSql.slice(groupPos + 8, endGroup) : cleanSql.slice(groupPos + 8)).trim();
+  }
 
   // HAVING clause
-  const havingMatch = cleanSql.match(
-    /\bHAVING\s+([\s\S]*?)(?:\bORDER\s+BY\b|\bLIMIT\b|$)/i
-  );
-  const havingClause = havingMatch ? havingMatch[1].trim() : '';
+  let havingClause = '';
+  if (havingPos !== -1) {
+    const endHaving = [orderPos, limitPos]
+      .filter((p) => p > havingPos)
+      .reduce((min, p) => (min === -1 || p < min ? p : min), -1);
+    havingClause = (endHaving !== -1 ? cleanSql.slice(havingPos + 6, endHaving) : cleanSql.slice(havingPos + 6)).trim();
+  }
 
   // SELECT projection
-  const selectMatch = cleanSql.match(/\bSELECT\s+(?:DISTINCT\s+)?([\s\S]*?)\s+\bFROM\b/i);
-  const selectClause = selectMatch ? selectMatch[1].trim() : '*';
+  let selectClause = '*';
+  const selectPos = findTopLevelKeywordPos(cleanSql, /^\bSELECT\b/i);
+  if (selectPos !== -1 && fromPos !== -1 && fromPos > selectPos) {
+    let selText = cleanSql.slice(selectPos + 6, fromPos).trim();
+    if (/^DISTINCT\b/i.test(selText)) {
+      selText = selText.replace(/^DISTINCT\b/i, '').trim();
+    }
+    selectClause = selText || '*';
+  }
 
   // ORDER BY clause
-  const orderByMatch = cleanSql.match(/\bORDER\s+BY\s+([\s\S]*?)(?:\bLIMIT\b|$)/i);
-  const orderByClause = orderByMatch ? orderByMatch[1].trim() : '';
+  let orderByClause = '';
+  if (orderPos !== -1) {
+    const endOrder = [limitPos]
+      .filter((p) => p > orderPos)
+      .reduce((min, p) => (min === -1 || p < min ? p : min), -1);
+    orderByClause = (endOrder !== -1 ? cleanSql.slice(orderPos + 8, endOrder) : cleanSql.slice(orderPos + 8)).trim();
+  }
 
-  // LIMIT clause
+  // LIMIT count
   const limitMatch = cleanSql.match(/\bLIMIT\s+([0-9]+)/i);
   const limitCount = limitMatch ? parseInt(limitMatch[1], 10) : 5;
 
@@ -594,6 +795,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     );
 
     const parsedTree = extractPredicateTree(sql);
+    const subqueryResolutions = await extractAndResolveSubqueries(whereClause, 'WHERE');
 
     events.push({
       id: 'event-where',
@@ -610,6 +812,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
         left: { type: 'column', columnName: 'r.score' },
         right: { type: 'literal', value: 7 },
       },
+      ...(subqueryResolutions.length > 0 ? { subqueryResolutions } : {}),
       durationMs,
     });
   }
@@ -716,6 +919,8 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
       }
     });
 
+    const havingSubqueryResolutions = await extractAndResolveSubqueries(havingClause, 'HAVING');
+
     events.push({
       id: 'event-having',
       stage: 'HAVING',
@@ -726,6 +931,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
       outputRows: [...currentRelation],
       groupBuckets: passedBuckets,
       rejectedGroupBuckets: rejectedBuckets,
+      ...(havingSubqueryResolutions.length > 0 ? { subqueryResolutions: havingSubqueryResolutions } : {}),
       durationMs,
     });
   }
@@ -751,6 +957,8 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     currentRelation = selectRows;
     const durationMs = measureDuration(startSelect);
 
+    const selectSubqueryResolutions = await extractAndResolveSubqueries(selectClause, 'SELECT');
+
     events.push({
       id: 'event-select',
       stage: 'SELECT',
@@ -759,6 +967,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
       description: `Projected columns: ${finalRes.columns.join(', ')}`,
       inputRows: prevRelation,
       outputRows: [...currentRelation],
+      ...(selectSubqueryResolutions.length > 0 ? { subqueryResolutions: selectSubqueryResolutions } : {}),
       durationMs,
     });
   }

@@ -496,6 +496,78 @@ describe('Execution Recorder', () => {
       expect(scope1Where?.outputRows.length).toBe(7);
     });
   });
+
+  describe('Phase 3 Subquery Recording', () => {
+    it('should record scalar and set subquery resolutions', async () => {
+      const sql = `
+        SELECT title, year
+        FROM movies
+        WHERE movie_id IN (SELECT movie_id FROM reviews WHERE score >= 8.5);
+      `;
+      const plan = await recordQueryExecution(sql);
+      const whereEvent = plan.events.find((e) => e.stage === 'WHERE');
+
+      expect(whereEvent).toBeDefined();
+      expect(whereEvent?.subqueryResolutions).toBeDefined();
+      expect(whereEvent?.subqueryResolutions!.length).toBeGreaterThan(0);
+      expect(whereEvent?.subqueryResolutions![0].type).toBe('set');
+      expect(whereEvent?.subqueryResolutions![0].rawQuery).toBe(
+        'SELECT movie_id FROM reviews WHERE score >= 8.5'
+      );
+      expect(Array.isArray(whereEvent?.subqueryResolutions![0].resolvedSet)).toBe(true);
+    });
+
+    it('should record scalar subquery resolutions', async () => {
+      const sql = `
+        SELECT title
+        FROM movies
+        WHERE year > (SELECT AVG(year) FROM movies);
+      `;
+      const plan = await recordQueryExecution(sql);
+      const whereEvent = plan.events.find((e) => e.stage === 'WHERE');
+
+      expect(whereEvent).toBeDefined();
+      expect(whereEvent?.subqueryResolutions).toBeDefined();
+      expect(whereEvent?.subqueryResolutions![0].type).toBe('scalar');
+      expect(whereEvent?.subqueryResolutions![0].rawQuery).toBe('SELECT AVG(year) FROM movies');
+      expect(typeof whereEvent?.subqueryResolutions![0].resolvedValue).toBe('number');
+    });
+
+    it('should record EXISTS subquery resolutions', async () => {
+      const sql = `
+        SELECT title
+        FROM movies
+        WHERE EXISTS (SELECT 1 FROM reviews WHERE score >= 9);
+      `;
+      const plan = await recordQueryExecution(sql);
+      const whereEvent = plan.events.find((e) => e.stage === 'WHERE');
+
+      expect(whereEvent).toBeDefined();
+      expect(whereEvent?.subqueryResolutions).toBeDefined();
+      expect(whereEvent?.subqueryResolutions![0].type).toBe('exists');
+      expect(whereEvent?.subqueryResolutions![0].rawQuery).toBe(
+        'SELECT 1 FROM reviews WHERE score >= 9'
+      );
+      expect(whereEvent?.subqueryResolutions![0].existsResult).toBe(true);
+    });
+
+    it('should record subquery resolutions in HAVING clause', async () => {
+      const sql = `
+        SELECT m.genre, AVG(r.score) as avg_score
+        FROM movies m
+        JOIN reviews r ON r.movie_id = m.movie_id
+        GROUP BY m.genre
+        HAVING AVG(r.score) >= (SELECT AVG(score) FROM reviews);
+      `;
+      const plan = await recordQueryExecution(sql);
+      const havingEvent = plan.events.find((e) => e.stage === 'HAVING');
+
+      expect(havingEvent).toBeDefined();
+      expect(havingEvent?.subqueryResolutions).toBeDefined();
+      expect(havingEvent?.subqueryResolutions![0].type).toBe('scalar');
+      expect(havingEvent?.subqueryResolutions![0].parentClause).toBe('HAVING');
+    });
+  });
 });
 
 
