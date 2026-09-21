@@ -5,6 +5,25 @@ import { getCompletionsForPosition } from './intellisense';
 
 let completionProviderRegistered = false;
 
+export const SQL_DARK_THEME_NAME = 'sql-dark';
+
+export const SQL_DARK_THEME_DATA = {
+  base: 'vs-dark' as const,
+  inherit: true,
+  rules: [],
+  colors: {
+    'editor.background': '#0B0D10',
+    'editor.lineHighlightBackground': '#111418',
+    'editorCursor.foreground': '#7C9CFF',
+  },
+};
+
+export const defineSqlDarkTheme = (monaco: any) => {
+  if (monaco?.editor?.defineTheme) {
+    monaco.editor.defineTheme(SQL_DARK_THEME_NAME, SQL_DARK_THEME_DATA);
+  }
+};
+
 export const SqlEditor: React.FC = () => {
   const { sql, setSql, runQuery } = useWorkspaceStore();
 
@@ -24,9 +43,12 @@ export const SqlEditor: React.FC = () => {
         <Editor
           height="100%"
           defaultLanguage="sql"
-          theme="vs-dark"
+          theme={SQL_DARK_THEME_NAME}
           value={sql}
           onChange={handleEditorChange}
+          beforeMount={(monaco) => {
+            defineSqlDarkTheme(monaco);
+          }}
           options={{
             fontSize: 13,
             fontFamily: 'JetBrains Mono, monospace',
@@ -38,6 +60,8 @@ export const SqlEditor: React.FC = () => {
             padding: { top: 8, bottom: 8 },
           }}
           onMount={(editor, monaco) => {
+            defineSqlDarkTheme(monaco);
+
             editor.addCommand(monaco.KeyCode.F5, () => {
               runQuery();
             });
@@ -48,6 +72,11 @@ export const SqlEditor: React.FC = () => {
                 triggerCharacters: [' ', '.', '('],
                 provideCompletionItems: (model: any, position: any) => {
                   const wordInfo = model.getWordUntilPosition(position);
+                  const lineContent = model.getLineContent ? model.getLineContent(position.lineNumber) : '';
+                  const textBefore = lineContent ? lineContent.substring(0, wordInfo.startColumn - 1) : '';
+                  const dotMatch = textBefore.match(/([a-zA-Z0-9_]+)\.$/);
+                  const searchWord = dotMatch ? `${dotMatch[1]}.${wordInfo.word}` : wordInfo.word;
+
                   const range = {
                     startLineNumber: position.lineNumber,
                     endLineNumber: position.lineNumber,
@@ -56,7 +85,7 @@ export const SqlEditor: React.FC = () => {
                   };
                   const schema = useWorkspaceStore.getState().schema;
                   const currentSql = model.getValue();
-                  const completions = getCompletionsForPosition(currentSql, wordInfo.word, schema);
+                  const completions = getCompletionsForPosition(currentSql, searchWord, schema);
 
                   return {
                     suggestions: completions.map((item) => ({
