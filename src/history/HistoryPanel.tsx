@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { QueryHistoryItem, SavedSnippet } from '../types';
-import { Clock, Bookmark, Search, CheckSquare, Square, Trash2, ArrowRight, Zap, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Clock, Bookmark, Search, Trash2, ArrowRight, Zap, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 export interface HistoryPanelProps {
   history: QueryHistoryItem[];
@@ -15,7 +15,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
   history,
   snippets = [],
   onSelectSql,
-  onSaveSnippet,
+  onSaveSnippet: _onSaveSnippet,
   onDeleteSnippet,
   onClearHistory,
 }) => {

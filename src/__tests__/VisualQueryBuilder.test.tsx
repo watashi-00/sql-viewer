@@ -48,14 +48,11 @@ describe('VisualQueryBuilder Component', () => {
   });
 
   it('renders table selection and header', () => {
-    let generatedSql = '';
     act(() => {
       root.render(
         React.createElement(VisualQueryBuilder, {
           schema: mockSchema,
-          onSqlChange: (sql: string) => {
-            generatedSql = sql;
-          }
+          onSqlChange: () => {}
         })
       );
     });
