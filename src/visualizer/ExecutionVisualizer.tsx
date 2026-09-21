@@ -1,6 +1,9 @@
 import React from 'react';
 import { useWorkspaceStore } from '../state/useWorkspaceStore';
 import { PredicateTree } from './PredicateTree';
+import { JoinVisualizer } from './JoinVisualizer';
+import { GroupByVisualizer } from './GroupByVisualizer';
+import { DistinctVisualizer } from './DistinctVisualizer';
 import { Play, SkipBack, SkipForward, RotateCcw, CheckCircle2, Circle, ArrowRight } from 'lucide-react';
 
 export const ExecutionVisualizer: React.FC = () => {
@@ -132,6 +135,22 @@ export const ExecutionVisualizer: React.FC = () => {
                 <div className="text-xs font-mono text-muted uppercase">Predicate Evaluation Tree</div>
                 <PredicateTree node={currentEvent.predicateTree} />
               </div>
+            )}
+
+            {currentEvent.stage === 'JOIN' && (
+              <JoinVisualizer matches={currentEvent.joinMatches} />
+            )}
+
+            {(currentEvent.stage === 'GROUP BY' || currentEvent.stage === 'HAVING') && (
+              <GroupByVisualizer buckets={currentEvent.groupBuckets} />
+            )}
+
+            {currentEvent.stage === 'DISTINCT' && (
+              <DistinctVisualizer
+                inputCount={currentEvent.inputRows.length}
+                outputCount={currentEvent.outputRows.length}
+                duplicatesRemoved={currentEvent.distinctDuplicatesRemoved ?? (currentEvent.inputRows.length - currentEvent.outputRows.length)}
+              />
             )}
           </div>
         ) : (

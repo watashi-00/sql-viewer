@@ -395,4 +395,152 @@ describe('ExecutionVisualizer Component', () => {
 
     expect(container.textContent).not.toContain('PREDICATE EVALUATION TREE');
   });
+
+  it('renders JoinVisualizer when stage is JOIN', () => {
+    const joinPlan: ExecutionPlan = {
+      query: 'SELECT * FROM A JOIN B ON A.id = B.a_id',
+      stages: ['JOIN'],
+      events: [
+        {
+          id: 'event-join',
+          stage: 'JOIN',
+          stageIndex: 0,
+          title: 'Stage: JOIN',
+          description: 'Joined A and B',
+          inputRows: [{ id: 1 }, { id: 2 }],
+          outputRows: [{ id: 1, a_id: 1 }],
+          joinMatches: [
+            {
+              leftRowId: 1,
+              rightRowId: 1,
+              isMatch: true,
+              leftValues: { id: 1, title: 'Inception' },
+              rightValues: { a_id: 1, title: 'Inception' },
+              joinPredicate: 'A.id = B.a_id',
+            },
+          ],
+        },
+      ],
+      finalResult: [],
+      columns: [],
+    };
+
+    useWorkspaceStore.setState({
+      executionPlan: joinPlan,
+      stages: joinPlan.stages,
+      currentStageIndex: 0,
+      debugState: 'paused',
+    });
+
+    act(() => {
+      root.render(React.createElement(ExecutionVisualizer));
+    });
+
+    expect(container.textContent).toContain('LEFT RELATION');
+    expect(container.textContent).toContain('Inception');
+  });
+
+  it('renders GroupByVisualizer when stage is GROUP BY or HAVING', () => {
+    const groupByPlan: ExecutionPlan = {
+      query: 'SELECT genre, COUNT(*) FROM movies GROUP BY genre HAVING COUNT(*) > 1',
+      stages: ['GROUP BY', 'HAVING'],
+      events: [
+        {
+          id: 'event-groupby',
+          stage: 'GROUP BY',
+          stageIndex: 0,
+          title: 'Stage: GROUP BY',
+          description: 'Grouped rows by genre',
+          inputRows: [{ genre: 'Action' }],
+          outputRows: [{ genre: 'Action', count: 2 }],
+          groupBuckets: [
+            {
+              groupKey: 'Action',
+              rows: [{ genre: 'Action' }, { genre: 'Action' }],
+              aggregates: [],
+            },
+          ],
+        },
+        {
+          id: 'event-having',
+          stage: 'HAVING',
+          stageIndex: 1,
+          title: 'Stage: HAVING',
+          description: 'Filtered groups',
+          inputRows: [{ genre: 'Action', count: 2 }],
+          outputRows: [{ genre: 'Action', count: 2 }],
+          groupBuckets: [
+            {
+              groupKey: 'Action',
+              rows: [{ genre: 'Action' }, { genre: 'Action' }],
+              aggregates: [],
+            },
+          ],
+        },
+      ],
+      finalResult: [],
+      columns: [],
+    };
+
+    // Test GROUP BY
+    useWorkspaceStore.setState({
+      executionPlan: groupByPlan,
+      stages: groupByPlan.stages,
+      currentStageIndex: 0,
+      debugState: 'paused',
+    });
+
+    act(() => {
+      root.render(React.createElement(ExecutionVisualizer));
+    });
+
+    expect(container.textContent).toContain('GROUP BY PARTITIONS');
+    expect(container.textContent).toContain('Action');
+
+    // Test HAVING
+    act(() => {
+      useWorkspaceStore.setState({
+        currentStageIndex: 1,
+      });
+      root.render(React.createElement(ExecutionVisualizer));
+    });
+
+    expect(container.textContent).toContain('GROUP BY PARTITIONS');
+  });
+
+  it('renders DistinctVisualizer when stage is DISTINCT', () => {
+    const distinctPlan: ExecutionPlan = {
+      query: 'SELECT DISTINCT genre FROM movies',
+      stages: ['DISTINCT'],
+      events: [
+        {
+          id: 'event-distinct',
+          stage: 'DISTINCT',
+          stageIndex: 0,
+          title: 'Stage: DISTINCT',
+          description: 'Deduplicated rows',
+          inputRows: [{ genre: 'Action' }, { genre: 'Action' }, { genre: 'Drama' }],
+          outputRows: [{ genre: 'Action' }, { genre: 'Drama' }],
+          distinctDuplicatesRemoved: 1,
+        },
+      ],
+      finalResult: [],
+      columns: [],
+    };
+
+    useWorkspaceStore.setState({
+      executionPlan: distinctPlan,
+      stages: distinctPlan.stages,
+      currentStageIndex: 0,
+      debugState: 'paused',
+    });
+
+    act(() => {
+      root.render(React.createElement(ExecutionVisualizer));
+    });
+
+    expect(container.textContent).toContain('DISTINCT DEDUPLICATION');
+    expect(container.textContent).toContain('1 Duplicates Collapsed');
+  });
 });
+
