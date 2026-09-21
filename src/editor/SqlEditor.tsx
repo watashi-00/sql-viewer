@@ -33,6 +33,34 @@ export const SQL_LIGHT_THEME_DATA = {
   },
 };
 
+export const SQL_NOIR_THEME_NAME = 'sql-noir';
+
+export const SQL_NOIR_THEME_DATA = {
+  base: 'vs-dark' as const,
+  inherit: true,
+  rules: [],
+  colors: {
+    'editor.background': '#050608',
+    'editor.foreground': '#EEF0F2',
+    'editor.lineHighlightBackground': '#0C0E12',
+    'editorCursor.foreground': '#E1B85C',
+  },
+};
+
+export const SQL_OCEAN_THEME_NAME = 'sql-ocean';
+
+export const SQL_OCEAN_THEME_DATA = {
+  base: 'vs-dark' as const,
+  inherit: true,
+  rules: [],
+  colors: {
+    'editor.background': '#07111D',
+    'editor.foreground': '#E1F0FF',
+    'editor.lineHighlightBackground': '#0E263E',
+    'editorCursor.foreground': '#4BB0E6',
+  },
+};
+
 export const defineSqlDarkTheme = (monaco: any) => {
   if (monaco?.editor?.defineTheme) {
     monaco.editor.defineTheme(SQL_DARK_THEME_NAME, SQL_DARK_THEME_DATA);
@@ -45,12 +73,32 @@ export const defineSqlLightTheme = (monaco: any) => {
   }
 };
 
+export const defineSqlNoirTheme = (monaco: any) => {
+  if (monaco?.editor?.defineTheme) {
+    monaco.editor.defineTheme(SQL_NOIR_THEME_NAME, SQL_NOIR_THEME_DATA);
+  }
+};
+
+export const defineSqlOceanTheme = (monaco: any) => {
+  if (monaco?.editor?.defineTheme) {
+    monaco.editor.defineTheme(SQL_OCEAN_THEME_NAME, SQL_OCEAN_THEME_DATA);
+  }
+};
+
 export interface SqlEditorProps {
   theme?: AppTheme;
 }
 
 export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
   const { sql, setSql, runQuery } = useWorkspaceStore();
+  const monacoTheme =
+    theme === 'light'
+      ? SQL_LIGHT_THEME_NAME
+      : theme === 'noir'
+        ? SQL_NOIR_THEME_NAME
+        : theme === 'ocean'
+          ? SQL_OCEAN_THEME_NAME
+          : SQL_DARK_THEME_NAME;
 
   const handleEditorChange = (value?: string) => {
     if (value !== undefined) {
@@ -68,12 +116,14 @@ export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
         <Editor
           height="100%"
           defaultLanguage="sql"
-          theme={theme === 'light' ? SQL_LIGHT_THEME_NAME : SQL_DARK_THEME_NAME}
+          theme={monacoTheme}
           value={sql}
           onChange={handleEditorChange}
           beforeMount={(monaco) => {
             defineSqlDarkTheme(monaco);
             defineSqlLightTheme(monaco);
+            defineSqlNoirTheme(monaco);
+            defineSqlOceanTheme(monaco);
           }}
           options={{
             fontSize: 13,
@@ -88,6 +138,8 @@ export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
           onMount={(editor, monaco) => {
             defineSqlDarkTheme(monaco);
             defineSqlLightTheme(monaco);
+            defineSqlNoirTheme(monaco);
+            defineSqlOceanTheme(monaco);
 
             editor.addCommand(monaco.KeyCode.F5, () => {
               runQuery();

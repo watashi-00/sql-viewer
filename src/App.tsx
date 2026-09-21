@@ -49,6 +49,8 @@ export const App: React.FC = () => {
             >
               <option value="midnight">Midnight</option>
               <option value="light">Light</option>
+              <option value="noir">Noir</option>
+              <option value="ocean">Ocean</option>
             </select>
           </label>
           <button
