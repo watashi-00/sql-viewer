@@ -55,6 +55,9 @@ describe('Execution Recorder', () => {
     expect(groupEvent).toBeDefined();
     expect(groupEvent?.inputRows.length).toBe(whereEvent?.outputRows.length);
     expect(groupEvent?.outputRows.length).toBeGreaterThan(0);
+    expect(groupEvent?.groupBuckets).toBeDefined();
+    expect(groupEvent?.groupBuckets!.length).toBeGreaterThan(0);
+    expect(groupEvent?.groupBuckets![0].aggregates.length).toBeGreaterThan(0);
 
     // Verify SELECT event
     const selectEvent = plan.events.find((e) => e.stage === 'SELECT');
@@ -194,4 +197,124 @@ describe('Execution Recorder', () => {
       expect(joinEvent?.unmatchedRightRows?.length).toBe(8);
     });
   });
+
+  describe('Phase 2 GROUP BY & Aggregate Formulas Recording', () => {
+    it('should record group buckets and aggregate calculations for GROUP BY', async () => {
+      const sql = `
+        SELECT m.title, AVG(r.score) AS average_score
+        FROM movies m
+        JOIN reviews r ON r.movie_id = m.movie_id
+        GROUP BY m.title
+      `;
+      const plan = await recordQueryExecution(sql);
+      const groupEvent = plan.events.find((e) => e.stage === 'GROUP BY');
+
+      expect(groupEvent).toBeDefined();
+      expect(groupEvent?.groupBuckets).toBeDefined();
+      expect(groupEvent?.groupBuckets!.length).toBeGreaterThan(0);
+
+      const firstBucket = groupEvent!.groupBuckets![0];
+      expect(firstBucket.groupKey).toBeDefined();
+      expect(firstBucket.rows.length).toBeGreaterThan(0);
+      expect(firstBucket.aggregates.length).toBeGreaterThan(0);
+
+      const avgAgg = firstBucket.aggregates.find((a) => a.funcName === 'AVG');
+      expect(avgAgg).toBeDefined();
+      expect(avgAgg?.expression).toBe('r.score');
+      expect(avgAgg?.inputValues.length).toBeGreaterThan(0);
+      expect(avgAgg?.formulaStep).toContain('/');
+      expect(typeof avgAgg?.finalValue).toBe('number');
+    });
+
+    it('should calculate multiple aggregate formulas (COUNT, SUM, MIN, MAX, AVG)', async () => {
+      const sql = `
+        SELECT m.title,
+               COUNT(r.score) AS review_count,
+               SUM(r.score) AS total_score,
+               MIN(r.score) AS min_score,
+               MAX(r.score) AS max_score,
+               AVG(r.score) AS avg_score
+        FROM movies m
+        JOIN reviews r ON r.movie_id = m.movie_id
+        GROUP BY m.title
+      `;
+      const plan = await recordQueryExecution(sql);
+      const groupEvent = plan.events.find((e) => e.stage === 'GROUP BY');
+
+      expect(groupEvent).toBeDefined();
+      expect(groupEvent?.groupBuckets).toBeDefined();
+      const bucket = groupEvent?.groupBuckets?.find((b) => b.groupKey === 'Inception');
+      expect(bucket).toBeDefined();
+      expect(bucket?.aggregates.length).toBe(5);
+
+      const countAgg = bucket?.aggregates.find((a) => a.funcName === 'COUNT');
+      expect(countAgg?.formulaStep).toContain('non-null values');
+      expect(countAgg?.finalValue).toBe(2);
+
+      const sumAgg = bucket?.aggregates.find((a) => a.funcName === 'SUM');
+      expect(sumAgg?.formulaStep).toContain('+');
+      expect(sumAgg?.finalValue).toBe(17); // 9 + 8
+
+      const minAgg = bucket?.aggregates.find((a) => a.funcName === 'MIN');
+      expect(minAgg?.formulaStep).toContain('MIN');
+      expect(minAgg?.finalValue).toBe(8);
+
+      const maxAgg = bucket?.aggregates.find((a) => a.funcName === 'MAX');
+      expect(maxAgg?.formulaStep).toContain('MAX');
+      expect(maxAgg?.finalValue).toBe(9);
+
+      const avgAgg = bucket?.aggregates.find((a) => a.funcName === 'AVG');
+      expect(avgAgg?.finalValue).toBe(8.5);
+    });
+
+    it('should record HAVING group filtering with passed and rejected buckets', async () => {
+      const sql = `
+        SELECT m.title, AVG(r.score) AS average_score
+        FROM movies m
+        JOIN reviews r ON r.movie_id = m.movie_id
+        GROUP BY m.title
+        HAVING AVG(r.score) >= 8.5
+      `;
+      const plan = await recordQueryExecution(sql);
+      expect(plan.stages).toContain('HAVING');
+
+      const havingEvent = plan.events.find((e) => e.stage === 'HAVING');
+      expect(havingEvent).toBeDefined();
+      expect(havingEvent?.groupBuckets).toBeDefined();
+      expect(havingEvent?.rejectedGroupBuckets).toBeDefined();
+
+      // All buckets in groupBuckets should have havingPassed === true
+      for (const bucket of havingEvent!.groupBuckets!) {
+        expect(bucket.havingPassed).toBe(true);
+        expect(bucket.havingPredicate).toBe('AVG(r.score) >= 8.5');
+      }
+
+      // All buckets in rejectedGroupBuckets should have havingPassed === false
+      for (const bucket of havingEvent!.rejectedGroupBuckets!) {
+        expect(bucket.havingPassed).toBe(false);
+        expect(bucket.havingPredicate).toBe('AVG(r.score) >= 8.5');
+      }
+
+      // Inception has score 8.5, so it should be in passed groupBuckets
+      const passedInception = havingEvent?.groupBuckets?.find((b) => b.groupKey === 'Inception');
+      expect(passedInception).toBeDefined();
+
+      // Oppenheimer has scores [9, 8], Pulp Fiction has [9], Barbie has [7, 8] (avg 7.5) -> Barbie should be rejected
+      const rejectedBarbie = havingEvent?.rejectedGroupBuckets?.find((b) => b.groupKey === 'Barbie');
+      expect(rejectedBarbie).toBeDefined();
+    });
+
+    it('should record DISTINCT deduplication metrics', async () => {
+      const sql = `SELECT DISTINCT genre FROM movies`;
+      const plan = await recordQueryExecution(sql);
+      expect(plan.stages).toContain('DISTINCT');
+
+      const distinctEvent = plan.events.find((e) => e.stage === 'DISTINCT');
+      expect(distinctEvent).toBeDefined();
+      expect(distinctEvent?.distinctDuplicatesRemoved).toBeDefined();
+      expect(distinctEvent?.distinctDuplicatesRemoved).toBeGreaterThanOrEqual(0);
+      expect(distinctEvent?.outputRows.length).toBeLessThanOrEqual(distinctEvent!.inputRows.length);
+    });
+  });
 });
+

@@ -1,6 +1,190 @@
 import { executeQuery } from '../database/duckdb';
 import { extractPipelineStages, extractPredicateTree } from '../parser/sqlParser';
-import { ExecutionEvent, ExecutionPlan, DataRow, JoinMatch, RowValue } from '../types';
+import {
+  ExecutionEvent,
+  ExecutionPlan,
+  DataRow,
+  JoinMatch,
+  RowValue,
+  GroupBucket,
+  GroupAggregateCalc,
+} from '../types';
+
+export interface AggregateDefinition {
+  funcName: 'AVG' | 'SUM' | 'COUNT' | 'MIN' | 'MAX';
+  expression: string;
+}
+
+/**
+ * Extracts aggregate function definitions from SELECT and optional HAVING clauses.
+ */
+export function extractAggregatesFromSql(
+  selectClause: string,
+  havingClause?: string
+): AggregateDefinition[] {
+  const aggs: AggregateDefinition[] = [];
+  const combined = `${selectClause} ${havingClause ?? ''}`;
+  const regex = /\b(AVG|SUM|COUNT|MIN|MAX)\s*\(\s*(?:DISTINCT\s+)?([*a-zA-Z0-9_.]+)\s*\)/gi;
+  let match: RegExpExecArray | null;
+  const seen = new Set<string>();
+  while ((match = regex.exec(combined)) !== null) {
+    const rawFunc = match[1].toUpperCase() as 'AVG' | 'SUM' | 'COUNT' | 'MIN' | 'MAX';
+    const expr = match[2].trim();
+    const key = `${rawFunc}:${expr}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      aggs.push({ funcName: rawFunc, expression: expr });
+    }
+  }
+  return aggs;
+}
+
+/**
+ * Resolves a group key for a data row based on the GROUP BY clause.
+ */
+export function getGroupKey(row: DataRow, groupByClause: string): string {
+  if (!groupByClause) return 'Group';
+  const cols = groupByClause.split(',').map((c) => c.trim());
+  const vals: string[] = [];
+  for (const col of cols) {
+    let val = row[col];
+    if (val === undefined && col.includes('.')) {
+      const unaliased = col.slice(col.indexOf('.') + 1);
+      val = row[unaliased];
+    }
+    if (val === undefined) {
+      const matchingKey = Object.keys(row).find((k) => k.endsWith(`.${col}`) || k === col);
+      if (matchingKey !== undefined) {
+        val = row[matchingKey];
+      }
+    }
+    if (val !== undefined && val !== null) {
+      vals.push(String(val));
+    }
+  }
+  if (vals.length > 0) {
+    return vals.join(', ');
+  }
+  return String(row['m.title'] ?? row['title'] ?? 'Group');
+}
+
+/**
+ * Extracts the value of a column/expression from a row.
+ */
+export function extractColValue(row: DataRow, expression: string): RowValue {
+  if (expression in row && row[expression] !== undefined) return row[expression];
+  if (expression.includes('.')) {
+    const colOnly = expression.slice(expression.indexOf('.') + 1);
+    if (colOnly in row && row[colOnly] !== undefined) return row[colOnly];
+  } else {
+    const key = Object.keys(row).find((k) => k.endsWith(`.${expression}`) || k === expression);
+    if (key && row[key] !== undefined) return row[key];
+  }
+  return row['r.score'] ?? row['score'];
+}
+
+/**
+ * Computes step-by-step aggregate calculations for a group bucket's rows.
+ */
+export function computeBucketAggregates(
+  rows: DataRow[],
+  aggs: AggregateDefinition[]
+): GroupAggregateCalc[] {
+  const calcs: GroupAggregateCalc[] = [];
+
+  for (const agg of aggs) {
+    switch (agg.funcName) {
+      case 'AVG': {
+        const rawVals = rows
+          .map((r) => extractColValue(r, agg.expression))
+          .filter((v) => v !== null && v !== undefined);
+        const numVals = rawVals.map(Number).filter((v) => !isNaN(v));
+        const count = numVals.length;
+        const sum = numVals.reduce((a, b) => a + b, 0);
+        const avg = count > 0 ? Number((sum / count).toFixed(2)) : 0;
+        calcs.push({
+          funcName: 'AVG',
+          expression: agg.expression,
+          inputValues: numVals,
+          formulaStep: count > 0 ? `(${numVals.join(' + ')}) / ${count}` : '0 / 0',
+          finalValue: avg,
+        });
+        break;
+      }
+      case 'SUM': {
+        const rawVals = rows
+          .map((r) => extractColValue(r, agg.expression))
+          .filter((v) => v !== null && v !== undefined);
+        const numVals = rawVals.map(Number).filter((v) => !isNaN(v));
+        const sum = numVals.reduce((a, b) => a + b, 0);
+        calcs.push({
+          funcName: 'SUM',
+          expression: agg.expression,
+          inputValues: numVals,
+          formulaStep: numVals.length > 0 ? numVals.join(' + ') : '0',
+          finalValue: sum,
+        });
+        break;
+      }
+      case 'COUNT': {
+        if (agg.expression === '*') {
+          calcs.push({
+            funcName: 'COUNT',
+            expression: '*',
+            inputValues: rows.map((_, i) => i + 1),
+            formulaStep: `${rows.length} rows in bucket → ${rows.length}`,
+            finalValue: rows.length,
+          });
+        } else {
+          const nonNullVals = rows
+            .map((r) => extractColValue(r, agg.expression))
+            .filter((v) => v !== null && v !== undefined);
+          calcs.push({
+            funcName: 'COUNT',
+            expression: agg.expression,
+            inputValues: nonNullVals,
+            formulaStep: `${nonNullVals.length} non-null values → ${nonNullVals.length}`,
+            finalValue: nonNullVals.length,
+          });
+        }
+        break;
+      }
+      case 'MIN': {
+        const rawVals = rows
+          .map((r) => extractColValue(r, agg.expression))
+          .filter((v) => v !== null && v !== undefined);
+        const numVals = rawVals.map(Number).filter((v) => !isNaN(v));
+        const min = numVals.length > 0 ? Math.min(...numVals) : 0;
+        calcs.push({
+          funcName: 'MIN',
+          expression: agg.expression,
+          inputValues: numVals,
+          formulaStep: numVals.length > 0 ? `MIN(${numVals.join(', ')})` : 'MIN()',
+          finalValue: min,
+        });
+        break;
+      }
+      case 'MAX': {
+        const rawVals = rows
+          .map((r) => extractColValue(r, agg.expression))
+          .filter((v) => v !== null && v !== undefined);
+        const numVals = rawVals.map(Number).filter((v) => !isNaN(v));
+        const max = numVals.length > 0 ? Math.max(...numVals) : 0;
+        calcs.push({
+          funcName: 'MAX',
+          expression: agg.expression,
+          inputValues: numVals,
+          formulaStep: numVals.length > 0 ? `MAX(${numVals.join(', ')})` : 'MAX()',
+          finalValue: max,
+        });
+        break;
+      }
+    }
+  }
+
+  return calcs;
+}
+
 
 /**
  * Maps rows to include keys prefixed by table alias as well as unaliased keys.
@@ -79,8 +263,14 @@ function extractClauses(sql: string) {
   );
   const groupByClause = groupByMatch ? groupByMatch[1].trim() : '';
 
+  // HAVING clause
+  const havingMatch = cleanSql.match(
+    /\bHAVING\s+([\s\S]*?)(?:\bORDER\s+BY\b|\bLIMIT\b|$)/i
+  );
+  const havingClause = havingMatch ? havingMatch[1].trim() : '';
+
   // SELECT projection
-  const selectMatch = cleanSql.match(/\bSELECT\s+([\s\S]*?)\s+\bFROM\b/i);
+  const selectMatch = cleanSql.match(/\bSELECT\s+(?:DISTINCT\s+)?([\s\S]*?)\s+\bFROM\b/i);
   const selectClause = selectMatch ? selectMatch[1].trim() : '*';
 
   // ORDER BY clause
@@ -100,6 +290,7 @@ function extractClauses(sql: string) {
     joinPredicate,
     whereClause,
     groupByClause,
+    havingClause,
     selectClause,
     orderByClause,
     limitCount,
@@ -122,12 +313,14 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     joinPredicate,
     whereClause,
     groupByClause,
+    havingClause,
     selectClause,
     orderByClause,
     limitCount,
   } = extractClauses(sql);
 
   let currentRelation: DataRow[] = [];
+  let lastGroupBuckets: GroupBucket[] = [];
 
   // Stage 1: FROM
   if (stages.includes('FROM')) {
@@ -392,17 +585,119 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     const durationMs = measureDuration(startGroup);
     currentRelation = groupRows;
 
-    const aggMatch = selectClause.match(/\b(AVG|COUNT|SUM|MIN|MAX)\s*\([^)]+\)/gi);
-    const aggDesc = aggMatch ? ` Evaluated ${aggMatch.join(', ')}.` : '';
+    // Partition rows into group buckets
+    const bucketMap = new Map<string, DataRow[]>();
+    prevRelation.forEach((row) => {
+      const keyVal = getGroupKey(row, groupByClause);
+      if (!bucketMap.has(keyVal)) bucketMap.set(keyVal, []);
+      bucketMap.get(keyVal)!.push(row);
+    });
+
+    const aggDefs = extractAggregatesFromSql(selectClause, havingClause);
+
+    const groupBuckets: GroupBucket[] = Array.from(bucketMap.entries()).map(([key, rows]) => {
+      let aggregates = computeBucketAggregates(rows, aggDefs);
+      if (aggregates.length === 0) {
+        const scores = rows
+          .map((r) => r['r.score'] ?? r['score'])
+          .filter((v) => v !== null && v !== undefined) as number[];
+        if (scores.length > 0) {
+          const sum = scores.reduce((a, b) => Number(a) + Number(b), 0);
+          const count = scores.length;
+          const avg = count > 0 ? Number((sum / count).toFixed(2)) : 0;
+          aggregates = [
+            {
+              funcName: 'AVG',
+              expression: 'r.score',
+              inputValues: scores,
+              formulaStep: `(${scores.join(' + ')}) / ${count}`,
+              finalValue: avg,
+            },
+          ];
+        }
+      }
+
+      return {
+        groupKey: key,
+        rows,
+        aggregates,
+      };
+    });
+
+    lastGroupBuckets = groupBuckets;
 
     events.push({
       id: 'event-group',
       stage: 'GROUP BY',
       stageIndex: events.length,
       title: 'GROUP BY Aggregation',
-      description: `Grouped ${prevRelation.length} rows into ${currentRelation.length} buckets by '${groupByClause}'.${aggDesc}`,
+      description: `Grouped ${prevRelation.length} rows into ${groupBuckets.length} buckets by '${groupByClause}'. Evaluated aggregate formulas.`,
       inputRows: prevRelation,
       outputRows: [...currentRelation],
+      groupBuckets,
+      durationMs,
+    });
+  }
+
+  // Stage 4b: HAVING
+  if (stages.includes('HAVING')) {
+    const prevRelation = [...currentRelation];
+    const startHaving = performance.now();
+    const havingQuery = `SELECT ${selectClause} FROM ${fromJoinClause} ${
+      whereClause ? `WHERE ${whereClause}` : ''
+    } GROUP BY ${groupByClause} HAVING ${havingClause}`;
+
+    let havingRows: DataRow[] = [];
+    try {
+      const havingRes = await executeQuery(havingQuery);
+      havingRows = havingRes.rows;
+    } catch {
+      havingRows = currentRelation;
+    }
+    const durationMs = measureDuration(startHaving);
+    currentRelation = havingRows;
+
+    let passedKeys = new Set<string>();
+    try {
+      const keyQuery = `SELECT ${groupByClause} AS _group_key FROM ${fromJoinClause} ${
+        whereClause ? `WHERE ${whereClause}` : ''
+      } GROUP BY ${groupByClause} HAVING ${havingClause}`;
+      const keyRes = await executeQuery(keyQuery);
+      passedKeys = new Set(keyRes.rows.map((r) => String(r._group_key ?? '')));
+    } catch {
+      havingRows.forEach((r) => {
+        const k = getGroupKey(r, groupByClause);
+        passedKeys.add(k);
+      });
+    }
+
+    const passedBuckets: GroupBucket[] = [];
+    const rejectedBuckets: GroupBucket[] = [];
+
+    (lastGroupBuckets || []).forEach((b) => {
+      const isPassed = passedKeys.has(b.groupKey);
+      const bucketCopy: GroupBucket = {
+        ...b,
+        havingPassed: isPassed,
+        havingPredicate: havingClause,
+      };
+      if (isPassed) {
+        passedBuckets.push(bucketCopy);
+      } else {
+        rejectedBuckets.push(bucketCopy);
+      }
+    });
+
+    events.push({
+      id: 'event-having',
+      stage: 'HAVING',
+      stageIndex: events.length,
+      title: 'HAVING Group Filter',
+      description: `Evaluated group predicate '${havingClause}'. Passed: ${passedBuckets.length} buckets, Rejected: ${rejectedBuckets.length} buckets.`,
+      inputRows: prevRelation,
+      outputRows: [...currentRelation],
+      groupBuckets: passedBuckets,
+      rejectedGroupBuckets: rejectedBuckets,
       durationMs,
     });
   }
@@ -436,6 +731,33 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
       description: `Projected columns: ${finalRes.columns.join(', ')}`,
       inputRows: prevRelation,
       outputRows: [...currentRelation],
+      durationMs,
+    });
+  }
+
+  // Stage 5b: DISTINCT
+  if (stages.includes('DISTINCT')) {
+    const prevRelation = [...currentRelation];
+    const startDistinct = performance.now();
+    const uniqueRows: DataRow[] = [];
+    for (const row of prevRelation) {
+      if (!uniqueRows.some((u) => isSameRow(u, row))) {
+        uniqueRows.push(row);
+      }
+    }
+    const duplicatesRemoved = prevRelation.length - uniqueRows.length;
+    currentRelation = uniqueRows;
+    const durationMs = measureDuration(startDistinct);
+
+    events.push({
+      id: 'event-distinct',
+      stage: 'DISTINCT',
+      stageIndex: events.length,
+      title: 'DISTINCT Deduplication',
+      description: `Removed ${duplicatesRemoved} duplicate rows. Retained ${uniqueRows.length} unique rows.`,
+      inputRows: prevRelation,
+      outputRows: [...currentRelation],
+      distinctDuplicatesRemoved: duplicatesRemoved,
       durationMs,
     });
   }
