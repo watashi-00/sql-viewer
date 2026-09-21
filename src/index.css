@@ -2,10 +2,96 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+  --color-base: 11 13 16;
+  --color-surface: 17 20 24;
+  --color-surface-secondary: 22 26 32;
+  --color-border: 39 44 51;
+  --color-primary: 230 232 235;
+  --color-secondary: 146 153 163;
+  --color-muted: 98 106 117;
+  --color-accent: 124 156 255;
+  --color-success: 98 197 138;
+  --color-warning: 217 164 65;
+  --color-error: 224 108 117;
+  --color-info: 110 168 254;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --color-base: 244 247 250;
+  --color-surface: 255 255 255;
+  --color-surface-secondary: 235 240 245;
+  --color-border: 205 214 222;
+  --color-primary: 24 33 42;
+  --color-secondary: 72 88 102;
+  --color-muted: 112 128 140;
+  --color-accent: 24 108 116;
+  --color-success: 26 125 76;
+  --color-warning: 171 105 0;
+  --color-error: 180 46 58;
+  --color-info: 37 99 235;
+}
+
+/* Keep the older builder utility classes aligned with the active palette. */
+[data-theme='light'] [class~='bg-[#0B0D10]'] {
+  background-color: rgb(var(--color-base)) !important;
+}
+
+[data-theme='light'] [class~='bg-[#111418]'] {
+  background-color: rgb(var(--color-surface)) !important;
+}
+
+[data-theme='light'] [class~='bg-[#181C22]'],
+[data-theme='light'] [class~='bg-[#20252D]'],
+[data-theme='light'] [class~='bg-[#15191F]'] {
+  background-color: rgb(var(--color-surface-secondary)) !important;
+}
+
+[data-theme='light'] [class~='text-[#7C9CFF]'],
+[data-theme='light'] [class~='bg-[#7C9CFF]'] {
+  color: rgb(var(--color-accent)) !important;
+  background-color: rgb(var(--color-accent));
+}
+
+[data-theme='light'] [class~='text-gray-100'],
+[data-theme='light'] [class~='text-gray-200'],
+[data-theme='light'] [class~='text-gray-300'] {
+  color: rgb(var(--color-primary)) !important;
+}
+
+[data-theme='light'] [class~='text-gray-400'] {
+  color: rgb(var(--color-secondary)) !important;
+}
+
+[data-theme='light'] [class~='text-gray-500'] {
+  color: rgb(var(--color-muted)) !important;
+}
+
+[data-theme='light'] [class~='bg-gray-800'],
+[data-theme='light'] [class~='bg-gray-900'] {
+  background-color: rgb(var(--color-surface-secondary)) !important;
+}
+
+[data-theme='light'] [class~='border-gray-600'],
+[data-theme='light'] [class~='border-gray-700'],
+[data-theme='light'] [class~='border-gray-800'] {
+  border-color: rgb(var(--color-border)) !important;
+}
+
+[data-theme='light'] [class~='hover:bg-gray-800']:hover {
+  background-color: rgb(var(--color-surface-secondary)) !important;
+}
+
+[data-theme='light'] [class~='hover:text-red-400']:hover {
+  color: rgb(var(--color-error)) !important;
+}
+
 body {
   margin: 0;
-  background-color: #0B0D10;
-  color: #E6E8EB;
+  background-color: rgb(var(--color-base));
+  color: rgb(var(--color-primary));
   font-family: 'Inter', system-ui, sans-serif;
   overflow: hidden;
 }

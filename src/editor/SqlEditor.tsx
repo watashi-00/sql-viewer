@@ -2,6 +2,7 @@ import React from 'react';
 import Editor from '@monaco-editor/react';
 import { useWorkspaceStore } from '../state/useWorkspaceStore';
 import { getCompletionsForPosition } from './intellisense';
+import { AppTheme } from '../theme';
 
 let completionProviderRegistered = false;
 
@@ -18,13 +19,37 @@ export const SQL_DARK_THEME_DATA = {
   },
 };
 
+export const SQL_LIGHT_THEME_NAME = 'sql-light';
+
+export const SQL_LIGHT_THEME_DATA = {
+  base: 'vs' as const,
+  inherit: true,
+  rules: [],
+  colors: {
+    'editor.background': '#FFFFFF',
+    'editor.foreground': '#18212A',
+    'editor.lineHighlightBackground': '#EBF0F5',
+    'editorCursor.foreground': '#186C74',
+  },
+};
+
 export const defineSqlDarkTheme = (monaco: any) => {
   if (monaco?.editor?.defineTheme) {
     monaco.editor.defineTheme(SQL_DARK_THEME_NAME, SQL_DARK_THEME_DATA);
   }
 };
 
-export const SqlEditor: React.FC = () => {
+export const defineSqlLightTheme = (monaco: any) => {
+  if (monaco?.editor?.defineTheme) {
+    monaco.editor.defineTheme(SQL_LIGHT_THEME_NAME, SQL_LIGHT_THEME_DATA);
+  }
+};
+
+export interface SqlEditorProps {
+  theme?: AppTheme;
+}
+
+export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
   const { sql, setSql, runQuery } = useWorkspaceStore();
 
   const handleEditorChange = (value?: string) => {
@@ -43,11 +68,12 @@ export const SqlEditor: React.FC = () => {
         <Editor
           height="100%"
           defaultLanguage="sql"
-          theme={SQL_DARK_THEME_NAME}
+          theme={theme === 'light' ? SQL_LIGHT_THEME_NAME : SQL_DARK_THEME_NAME}
           value={sql}
           onChange={handleEditorChange}
           beforeMount={(monaco) => {
             defineSqlDarkTheme(monaco);
+            defineSqlLightTheme(monaco);
           }}
           options={{
             fontSize: 13,
@@ -61,6 +87,7 @@ export const SqlEditor: React.FC = () => {
           }}
           onMount={(editor, monaco) => {
             defineSqlDarkTheme(monaco);
+            defineSqlLightTheme(monaco);
 
             editor.addCommand(monaco.KeyCode.F5, () => {
               runQuery();
