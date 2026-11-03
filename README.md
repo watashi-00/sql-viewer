@@ -70,6 +70,13 @@ Users can step through query execution using a deterministic state machine, insp
 - **Ocean**: A blue-forward dark palette for long analysis sessions.
 - Theme preference is stored locally in the browser.
 
+### 8. SQL Challenges
+- Practice with a searchable challenge catalog, difficulty levels, topic tags, hints, and per-device progress.
+- Each challenge uses a dedicated temporary DuckDB schema and validates query results rather than matching solution text.
+- Open the relational debugger and physical plan for each attempt. Challenge data, SQL, and result selection stay separate from the regular workspace.
+- Challenges are local exercises; there is no leaderboard or server-side submission.
+- See [challenge contribution guidance](docs/challenges.md) to add problems through a pull request.
+
 ---
 
 ## Architecture

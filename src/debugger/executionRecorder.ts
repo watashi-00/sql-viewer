@@ -60,13 +60,19 @@ function measureDuration(startTime: number): number {
 
 export { isCreateTableStatement } from '../database/sqlMutation';
 
-export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> {
+export async function recordQueryExecution(
+  sql: string,
+  options: { execute?: typeof executeQuery; persistMutations?: boolean } = {}
+): Promise<ExecutionPlan> {
+  const query = options.execute ?? executeQuery;
   if (isMutatingStatement(sql)) {
-    await executeQuery(sql);
-    if (isCreateTableStatement(sql)) {
-      await persistWorkspaceCommand(sql);
-    } else {
-      await persistWorkspaceMutation(sql);
+    await query(sql);
+    if (options.persistMutations !== false) {
+      if (isCreateTableStatement(sql)) {
+        await persistWorkspaceCommand(sql);
+      } else {
+        await persistWorkspaceMutation(sql);
+      }
     }
     return {
       query: sql,
@@ -101,10 +107,10 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
       }
 
       // Record CTE execution recursively
-      const ctePlan = await recordQueryExecution(cteSql);
+      const ctePlan = await recordQueryExecution(cteSql, options);
 
       // Register temporary table in DuckDB WASM
-      await executeQuery(`CREATE OR REPLACE TEMP TABLE ${aliasName} AS (${cteSql})`);
+      await query(`CREATE OR REPLACE TEMP TABLE ${aliasName} AS (${cteSql})`);
 
       cteScopes.push({
         id: `cte-${aliasName}`,
@@ -120,7 +126,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
   const events: ExecutionEvent[] = [];
 
   // Execute full query first for columns & final result (also validates query)
-  const finalRes = await executeQuery(sql);
+  const finalRes = await query(sql);
 
   const {
     cleanSql,
@@ -143,7 +149,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
   // Stage 1: FROM
   if (stages.includes('FROM')) {
     const startFrom = performance.now();
-    const fromRes = await executeQuery(`SELECT * FROM ${baseTable}`);
+    const fromRes = await query(`SELECT * FROM ${baseTable}`);
     const durationMs = measureDuration(startFrom);
     currentRelation = withAlias(fromRes.rows, baseAlias);
 
@@ -165,7 +171,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     const startJoin = performance.now();
     let joinRows: DataRow[] = [];
     try {
-      const joinRes = await executeQuery(`SELECT * FROM ${fromJoinClause}`);
+      const joinRes = await query(`SELECT * FROM ${fromJoinClause}`);
       joinRows = joinRes.rows;
     } catch {
       joinRows = currentRelation;
@@ -176,7 +182,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     // Build tuple match pairs between left relation and right relation
     let leftRows: DataRow[] = [];
     try {
-      const leftRes = await executeQuery(`SELECT * FROM ${baseTable}`);
+      const leftRes = await query(`SELECT * FROM ${baseTable}`);
       leftRows = leftRes.rows;
     } catch {
       leftRows = prevRelation;
@@ -190,7 +196,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
 
     let rightRows: DataRow[] = [];
     try {
-      const rightRes = await executeQuery(`SELECT * FROM ${rightTable}`);
+      const rightRes = await query(`SELECT * FROM ${rightTable}`);
       rightRows = rightRes.rows;
     } catch {
       rightRows = [];
@@ -349,7 +355,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
 
     let whereResRows: DataRow[] = [];
     try {
-      const whereRes = await executeQuery(whereQuery);
+      const whereRes = await query(whereQuery);
       whereResRows = whereRes.rows;
       if (!stages.includes('JOIN')) {
         whereResRows = withAlias(whereResRows, baseAlias);
@@ -365,7 +371,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     );
 
     const parsedTree = extractPredicateTree(sql);
-    const subqueryResolutions = await extractAndResolveSubqueries(whereClause, 'WHERE');
+    const subqueryResolutions = await extractAndResolveSubqueries(whereClause, 'WHERE', query);
 
     events.push({
       id: 'event-where',
@@ -397,7 +403,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     const startGroup = performance.now();
     let groupRows: DataRow[] = [];
     try {
-      const groupRes = await executeQuery(groupQuery);
+      const groupRes = await query(groupQuery);
       groupRows = groupRes.rows;
     } catch {
       groupRows = currentRelation;
@@ -450,7 +456,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
 
     let havingRows: DataRow[] = [];
     try {
-      const havingRes = await executeQuery(havingQuery);
+      const havingRes = await query(havingQuery);
       havingRows = havingRes.rows;
     } catch {
       havingRows = currentRelation;
@@ -463,7 +469,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
       const keyQuery = `SELECT ${groupByClause} FROM ${fromJoinClause} ${
         whereClause ? `WHERE ${whereClause}` : ''
       } GROUP BY ${groupByClause} HAVING ${havingClause}`;
-      const keyRes = await executeQuery(keyQuery);
+      const keyRes = await query(keyQuery);
       passedKeys = new Set(keyRes.rows.map((r) => getGroupKey(r, groupByClause)));
     } catch {
       havingRows.forEach((r) => {
@@ -489,7 +495,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
       }
     });
 
-    const havingSubqueryResolutions = await extractAndResolveSubqueries(havingClause, 'HAVING');
+    const havingSubqueryResolutions = await extractAndResolveSubqueries(havingClause, 'HAVING', query);
 
     events.push({
       id: 'event-having',
@@ -518,7 +524,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     }`;
     let selectRows: DataRow[];
     try {
-      const selectRes = await executeQuery(selectQuery);
+      const selectRes = await query(selectQuery);
       selectRows = selectRes.rows;
     } catch {
       selectRows = currentRelation;
@@ -527,7 +533,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     currentRelation = selectRows;
     const durationMs = measureDuration(startSelect);
 
-    const selectSubqueryResolutions = await extractAndResolveSubqueries(selectClause, 'SELECT');
+    const selectSubqueryResolutions = await extractAndResolveSubqueries(selectClause, 'SELECT', query);
 
     events.push({
       id: 'event-select',
@@ -577,7 +583,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     const startOrder = performance.now();
     let orderRows: DataRow[] = [];
     try {
-      const orderRes = await executeQuery(orderQuery);
+      const orderRes = await query(orderQuery);
       orderRows = orderRes.rows;
     } catch {
       orderRows = currentRelation;
@@ -619,7 +625,7 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
   let explainTree: ExplainNode | undefined = undefined;
 
   try {
-    const explainRes = await executeQuery(`EXPLAIN ${sql}`);
+    const explainRes = await query(`EXPLAIN ${sql}`);
     if (explainRes.rows.length > 0) {
       const rawPlan =
         String(explainRes.rows[0].explain_value ?? '') ||

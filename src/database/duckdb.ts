@@ -102,7 +102,14 @@ export function persistWorkspaceMutation(sql: string): Promise<void> {
 
 export async function executeQuery(sql: string): Promise<{ rows: DataRow[]; columns: string[] }> {
   const { conn: currentConn } = await getDuckDB();
-  const arrowResult = await currentConn.query(sql);
+  return executeQueryOnConnection(currentConn, sql);
+}
+
+export async function executeQueryOnConnection(
+  connection: DuckDBConnection,
+  sql: string
+): Promise<{ rows: DataRow[]; columns: string[] }> {
+  const arrowResult = await connection.query(sql);
   const rows: DataRow[] = arrowResult.toArray().map((r) => {
     const json = r.toJSON() as Record<string, unknown>;
     const sanitized: DataRow = {};
@@ -113,6 +120,11 @@ export async function executeQuery(sql: string): Promise<{ rows: DataRow[]; colu
   });
   const columns: string[] = arrowResult.schema.fields.map((f) => f.name);
   return { rows, columns };
+}
+
+export async function connectDuckDB(): Promise<DuckDBConnection> {
+  const { db } = await getDuckDB();
+  return await db.connect();
 }
 
 export async function resetDatabase(): Promise<void> {
