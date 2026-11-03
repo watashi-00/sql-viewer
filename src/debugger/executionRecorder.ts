@@ -1127,17 +1127,17 @@ export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> 
     const prevRelation = [...currentRelation];
     const startSelect = performance.now();
 
-    let selectRows = currentRelation;
-    if (!stages.includes('GROUP BY') && selectClause !== '*') {
-      selectRows = currentRelation.map((r) => {
-        const projected: DataRow = {};
-        for (const col of finalRes.columns) {
-          if (col in r) {
-            projected[col] = r[col];
-          }
-        }
-        return projected;
-      });
+    const selectQuery = `SELECT ${selectClause} FROM ${fromJoinClause} ${
+      whereClause ? `WHERE ${whereClause}` : ''
+    } ${groupByClause ? `GROUP BY ${groupByClause}` : ''} ${
+      havingClause ? `HAVING ${havingClause}` : ''
+    }`;
+    let selectRows: DataRow[];
+    try {
+      const selectRes = await executeQuery(selectQuery);
+      selectRows = selectRes.rows;
+    } catch {
+      selectRows = currentRelation;
     }
 
     currentRelation = selectRows;
