@@ -19,6 +19,7 @@ GROUP BY m.title
 ORDER BY average_score DESC
 LIMIT 5;`,
       schema: null,
+      queryError: null,
       debugState: 'idle',
       executionPlan: null,
       stages: [],
@@ -36,6 +37,7 @@ LIMIT 5;`,
     expect(state.debugState).toBe('idle');
     expect(state.sql).toContain('SELECT');
     expect(state.schema).toBeNull();
+    expect(state.queryError).toBeNull();
     expect(state.executionPlan).toBeNull();
     expect(state.stages).toEqual([]);
     expect(state.currentStageIndex).toBe(0);
@@ -217,10 +219,24 @@ LIMIT 5;`,
 
   it('should set debugState to error when recordQueryExecution fails in runQuery', async () => {
     vi.spyOn(recorderModule, 'recordQueryExecution').mockRejectedValue(new Error('Syntax error'));
+    useWorkspaceStore.setState({
+      executionPlan: {
+        query: 'SELECT 1', stages: ['SELECT'], events: [], finalResult: [{ value: 1 }], columns: ['value'],
+      },
+      resultRows: [{ value: 1 }],
+      resultColumns: ['value'],
+    });
 
     await useWorkspaceStore.getState().runQuery();
 
     expect(useWorkspaceStore.getState().debugState).toBe('error');
+    expect(useWorkspaceStore.getState().queryError?.category).toBe('parser');
+    expect(useWorkspaceStore.getState().executionPlan).toBeNull();
+    expect(useWorkspaceStore.getState().resultRows).toEqual([]);
+
+    useWorkspaceStore.getState().setSql('SELECT 2');
+    expect(useWorkspaceStore.getState().queryError).toBeNull();
+    expect(useWorkspaceStore.getState().debugState).toBe('idle');
   });
 
   it('should automatically record executed queries into historyStore on runQuery success', async () => {

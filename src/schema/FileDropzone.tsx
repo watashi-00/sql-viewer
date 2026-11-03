@@ -3,6 +3,7 @@ import { Upload, FileText, CheckCircle2, AlertCircle, Loader2 } from 'lucide-rea
 import { registerAndLoadFile } from '../database/duckdb';
 import { useWorkspaceStore } from '../state/useWorkspaceStore';
 import { CustomFileImport } from '../types';
+import { diagnoseSqlError } from '../editor/sqlDiagnostics';
 
 export interface FileDropzoneProps {
   onFileLoaded?: (customImport: CustomFileImport) => void;
@@ -50,7 +51,8 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({ onFileLoaded, classN
         onFileLoaded(result);
       }
     } catch (err: any) {
-      setError(err?.message || 'Failed to import file into DuckDB');
+      const diagnostic = diagnoseSqlError(err, '', 'import');
+      setError(`${diagnostic.message} ${diagnostic.suggestion ?? ''} (${diagnostic.technicalMessage})`);
     } finally {
       setIsLoading(false);
     }

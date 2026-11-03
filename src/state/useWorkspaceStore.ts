@@ -4,6 +4,7 @@ import { recordQueryExecution } from '../debugger/executionRecorder';
 import { isMutatingStatement } from '../database/sqlMutation';
 import { getIntrospectedSchema, seedMoviesDataset } from '../database/schema';
 import { addHistoryItem } from '../storage/historyStore';
+import { diagnoseSqlError, SqlDiagnostic } from '../editor/sqlDiagnostics';
 
 export const DEFAULT_QUERY = `SELECT
     m.title,
@@ -19,6 +20,7 @@ LIMIT 5;`;
 export interface WorkspaceStore {
   sql: string;
   schema: Schema | null;
+  queryError: SqlDiagnostic | null;
   debugState: DebugState;
   executionPlan: ExecutionPlan | null;
   stages: OperationType[];
@@ -41,6 +43,7 @@ export interface WorkspaceStore {
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   sql: DEFAULT_QUERY,
   schema: null,
+  queryError: null,
   debugState: 'idle',
   executionPlan: null,
   stages: [],
@@ -50,7 +53,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   selectedRow: null,
   isInspectingRow: false,
 
-  setSql: (sql) => set({ sql }),
+  setSql: (sql) => set((state) => ({
+    sql,
+    queryError: null,
+    ...(state.debugState === 'error' ? { debugState: 'idle' as const } : {}),
+  })),
 
   loadSchema: async () => {
     await seedMoviesDataset();
@@ -59,7 +66,15 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   runQuery: async () => {
-    set({ debugState: 'running' });
+    set({
+      debugState: 'running',
+      queryError: null,
+      executionPlan: null,
+      stages: [],
+      currentStageIndex: 0,
+      resultRows: [],
+      resultColumns: [],
+    });
     const startTime = performance.now();
     const sql = get().sql;
     try {
@@ -84,17 +99,26 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         rowCount: plan.finalResult.length,
         status: 'success',
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       const durationMs = performance.now() - startTime;
-      set({ debugState: 'error' });
+      const diagnostic = diagnoseSqlError(err, sql);
+      set({
+        debugState: 'error',
+        queryError: diagnostic,
+        executionPlan: null,
+        stages: [],
+        currentStageIndex: 0,
+        resultRows: [],
+        resultColumns: [],
+      });
       await addHistoryItem({
         id: `h-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        sql: get().sql,
+        sql,
         timestamp: Date.now(),
         durationMs,
         rowCount: 0,
         status: 'error',
-        errorMessage: err?.message || 'Query execution error',
+        errorMessage: diagnostic.technicalMessage,
       });
     }
   },
