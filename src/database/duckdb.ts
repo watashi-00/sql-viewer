@@ -245,6 +245,8 @@ export async function resetDatabase(): Promise<void> {
   }
   initPromise = null;
   workspaceRestored = false;
+  workspaceStateLoaded = false;
+  persistedWorkspace = { files: [], commands: [] };
   mutationJournal.reset();
   await getDuckDB();
 }

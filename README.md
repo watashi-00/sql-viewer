@@ -29,7 +29,8 @@ Users can step through query execution using a deterministic state machine, insp
 - **Live Schema Introspection**: Real-time table row count querying upon WASM engine initialization.
 - **Custom Data Imports**: Load CSV, JSON, and Parquet files as DuckDB tables.
 - **DDL Support**: Execute `CREATE TABLE` and `CREATE OR REPLACE TABLE` commands from the SQL editor.
-- **Local Workspace Persistence**: Imported files and created tables are restored from browser IndexedDB after reload.
+- **Local Workspace Persistence**: Imported files and SQL mutations are restored from browser IndexedDB after reload.
+- **Workspace Management**: Start or clear a local workspace, or export/import a versioned JSON archive. Query history remains separate from workspace data.
 
 ### 3. Execution Pipeline Debugger
 - **State Machine**: Supports `idle`, `running`, `paused`, `stepping`, `completed`, and `error` states.

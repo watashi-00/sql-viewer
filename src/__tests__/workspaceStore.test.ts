@@ -127,4 +127,18 @@ describe('Workspace storage', () => {
       'sql:INSERT INTO existing VALUES (1)',
     ]);
   });
+
+  it('reports malformed local workspace records instead of silently treating them as empty', async () => {
+    await clearWorkspace();
+    await saveWorkspace({ files: 'broken' as unknown as [], commands: [] });
+
+    await expect(loadWorkspace()).rejects.toThrow('Saved workspace data is corrupted');
+  });
+
+  it('reports a corrupted ordered operation log', async () => {
+    await clearWorkspace();
+    await saveWorkspace({ files: [], commands: [], operations: ['not an operation'] as unknown as [] });
+
+    await expect(loadWorkspace()).rejects.toThrow('corrupted operation log');
+  });
 });

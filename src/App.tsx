@@ -8,6 +8,7 @@ import { Play, RotateCcw, Layers, Palette, Share2, Check } from 'lucide-react';
 import { useWorkspaceStore } from './state/useWorkspaceStore';
 import { applyTheme, getInitialTheme, AppTheme } from './theme';
 import { createShareableUrl, readShareableState } from './sharing/shareableQuery';
+import { WorkspaceControls } from './storage/WorkspaceControls';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'editor' | 'builder'>('editor');
@@ -95,6 +96,7 @@ export const App: React.FC = () => {
             {shareCopied ? <Check size={12} /> : <Share2 size={12} />}
             <span>{shareCopied ? 'Link copied' : 'Share'}</span>
           </button>
+          <WorkspaceControls />
           <button
             onClick={restartDebug}
             className="flex items-center gap-1 px-2.5 py-1 rounded bg-surface-secondary border border-border text-secondary hover:text-primary"
