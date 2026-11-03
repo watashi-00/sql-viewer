@@ -86,7 +86,8 @@ export function parseSubqueriesFromText(
  */
 export async function extractAndResolveSubqueries(
   clauseText: string,
-  parentClause: 'WHERE' | 'HAVING' | 'SELECT'
+  parentClause: 'WHERE' | 'HAVING' | 'SELECT',
+  queryExecutor: typeof executeQuery = executeQuery
 ): Promise<SubqueryResolution[]> {
   const parsed = parseSubqueriesFromText(clauseText, parentClause);
   const resolutions: SubqueryResolution[] = [];
@@ -100,7 +101,7 @@ export async function extractAndResolveSubqueries(
     };
 
     try {
-      const res = await executeQuery(sub.rawQuery);
+      const res = await queryExecutor(sub.rawQuery);
       if (sub.type === 'set') {
         resolution.resolvedSet = res.rows.map((row) => {
           const keys = Object.keys(row);

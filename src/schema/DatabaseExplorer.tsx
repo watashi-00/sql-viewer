@@ -6,7 +6,11 @@ import { HistoryPanel } from '../history/HistoryPanel';
 import { getHistoryItems, getSnippets, clearHistoryItems, deleteSnippet } from '../storage/historyStore';
 import { QueryHistoryItem, SavedSnippet } from '../types';
 
-export const DatabaseExplorer: React.FC = () => {
+export interface DatabaseExplorerProps {
+  onClose?: () => void;
+}
+
+export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({ onClose }) => {
   const { schema, loadSchema, setSql } = useWorkspaceStore();
   const [activeTab, setActiveTab] = useState<'tables' | 'history'>('tables');
   const [schemaError, setSchemaError] = useState('');
@@ -49,9 +53,22 @@ export const DatabaseExplorer: React.FC = () => {
   return (
     <div className="h-full w-full flex flex-col bg-surface border-r border-border text-primary font-sans select-none overflow-hidden">
       {/* Sidebar Top Header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border-b border-border text-xs font-semibold text-secondary shrink-0">
-        <Database size={14} className="text-accent" />
-        <span>DATABASE EXPLORER</span>
+      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-surface-secondary border-b border-border text-xs font-semibold text-secondary shrink-0">
+        <div className="flex items-center gap-2">
+          <Database size={14} className="text-accent" />
+          <span>DATABASE EXPLORER</span>
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close Database Explorer"
+            title="Close Database Explorer"
+            className="rounded px-1.5 text-muted hover:bg-surface hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          >
+            ×
+          </button>
+        )}
       </div>
 
       {/* File Dropzone at top of sidebar */}
