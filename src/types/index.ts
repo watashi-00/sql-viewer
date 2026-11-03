@@ -171,8 +171,18 @@ export interface VisualQueryNode {
   id: string;
   tableName: string;
   selectedColumns: string[];
+  columnAliases?: Record<string, string>;
+  groupByColumns?: string[];
   alias?: string;
   position: { x: number; y: number };
+}
+
+export interface VisualAggregate {
+  id: string;
+  table: string;
+  column: string;
+  fn: 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
+  alias?: string;
 }
 
 export interface VisualJoinEdge {
@@ -182,6 +192,7 @@ export interface VisualJoinEdge {
   rightTable: string;
   rightColumn: string;
   joinType: 'INNER' | 'LEFT' | 'RIGHT' | 'FULL';
+  operator?: '=' | '!=' | '>' | '>=' | '<' | '<=';
 }
 
 export interface VisualFilterCondition {
@@ -196,6 +207,7 @@ export interface VisualQueryState {
   nodes: VisualQueryNode[];
   joins: VisualJoinEdge[];
   filters: VisualFilterCondition[];
+  aggregates?: VisualAggregate[];
   limit?: number;
 }
 

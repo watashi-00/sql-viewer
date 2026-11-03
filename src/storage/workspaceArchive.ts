@@ -3,10 +3,11 @@ import {
   PersistedWorkspace,
   PersistedWorkspaceFile,
   PersistedWorkspaceOperation,
+  isBuilderState,
 } from './workspaceStore';
 
 const ARCHIVE_FORMAT = 'sql-viewer-workspace';
-const ARCHIVE_VERSION = 2;
+const ARCHIVE_VERSION = 3;
 
 interface EncodedFile extends Omit<PersistedWorkspaceFile, 'buffer'> {
   bufferBase64: string;
@@ -26,6 +27,7 @@ interface WorkspaceArchive {
     commands: PersistedWorkspace['commands'];
     operations: EncodedOperation[];
     editor?: PersistedWorkspace['editor'];
+    builder?: PersistedWorkspace['builder'];
   };
 }
 
@@ -134,6 +136,7 @@ export function serializeWorkspaceArchive(workspace: PersistedWorkspace): string
           : { type: 'file', file: encodeFile(operation.file), ...(operation.legacy ? { legacy: true } : {}) };
       }),
       ...(workspace.editor ? { editor: workspace.editor } : {}),
+      ...(workspace.builder ? { builder: workspace.builder } : {}),
     },
   };
   return JSON.stringify(archive, null, 2);
@@ -150,7 +153,7 @@ export function parseWorkspaceArchive(json: string): PersistedWorkspace {
   if (!isRecord(parsed) || parsed.format !== ARCHIVE_FORMAT) {
     throw new Error('This file is not a SQL Viewer workspace archive.');
   }
-  if (parsed.version !== 1 && parsed.version !== ARCHIVE_VERSION) {
+  if (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== ARCHIVE_VERSION) {
     throw new Error(`Unsupported workspace archive version: ${String(parsed.version)}.`);
   }
   if (!isRecord(parsed.workspace)) throw new Error('Workspace archive is missing its workspace data.');
@@ -189,6 +192,11 @@ export function parseWorkspaceArchive(json: string): PersistedWorkspace {
       },
     };
   }
+  let builder: PersistedWorkspace['builder'];
+  if (rawWorkspace.builder !== undefined) {
+    if (!isBuilderState(rawWorkspace.builder)) throw new Error('Workspace archive contains invalid query builder state.');
+    builder = rawWorkspace.builder;
+  }
 
   if (files.some((file) => !operations.some((operation) => operation.type === 'file' && sameFile(operation.file, file)))) {
     throw new Error('Workspace archive is missing a file restore operation.');
@@ -204,5 +212,6 @@ export function parseWorkspaceArchive(json: string): PersistedWorkspace {
     commands,
     operations,
     ...(editor ? { editor } : {}),
+    ...(builder ? { builder } : {}),
   };
 }

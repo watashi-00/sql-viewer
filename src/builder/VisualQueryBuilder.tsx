@@ -1,12 +1,32 @@
-import React, { useState, useEffect } from 'react';
-import { Schema, VisualQueryState, VisualQueryNode, VisualJoinEdge, VisualFilterCondition } from '../types';
-import { Database, Plus, Trash2, Link2, Filter, Table as TableIcon, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Schema, VisualQueryState, VisualQueryNode, VisualJoinEdge, VisualFilterCondition, VisualAggregate } from '../types';
+import { Database, Plus, Trash2, Link2, Filter, Table as TableIcon, RefreshCw, Sigma } from 'lucide-react';
+import { loadWorkspace, saveBuilderState } from '../storage/workspaceStore';
 
 export interface VisualQueryBuilderProps {
   schema: Schema;
   onSqlChange?: (sql: string) => void;
   initialState?: VisualQueryState;
   onStateChange?: (state: VisualQueryState) => void;
+}
+
+function sqlIdentifier(value: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value) ? value : `"${value.replace(/"/g, '""')}"`;
+}
+
+function tableReference(state: VisualQueryState, table: string): string {
+  const node = state.nodes.find((candidate) => candidate.alias === table) ||
+    state.nodes.find((candidate) => candidate.tableName === table);
+  return sqlIdentifier(node?.alias || table);
+}
+
+function tableSource(state: VisualQueryState, table: string): string {
+  const node = state.nodes.find((candidate) => candidate.alias === table) ||
+    state.nodes.find((candidate) => candidate.tableName === table);
+  if (!node) return sqlIdentifier(table);
+  return node.alias
+    ? `${sqlIdentifier(node.tableName)} AS ${sqlIdentifier(node.alias)}`
+    : sqlIdentifier(node.tableName);
 }
 
 export function buildSqlFromState(state: VisualQueryState): string {
@@ -16,14 +36,33 @@ export function buildSqlFromState(state: VisualQueryState): string {
 
   // 1. SELECT clause
   const selectParts: string[] = [];
-  state.nodes.forEach((node) => {
-    const tablePrefix = node.alias || node.tableName;
-    if (node.selectedColumns && node.selectedColumns.length > 0) {
-      node.selectedColumns.forEach((col) => {
-        selectParts.push(`${tablePrefix}.${col}`);
-      });
-    }
-  });
+  const aggregates = state.aggregates || [];
+  const groupByParts = state.nodes.flatMap((node) =>
+    (node.groupByColumns || []).map((column) => `${sqlIdentifier(node.alias || node.tableName)}.${sqlIdentifier(column)}`)
+  );
+  if (aggregates.length > 0 || groupByParts.length > 0) {
+    state.nodes.forEach((node) => (node.groupByColumns || []).forEach((column) => {
+      const expression = `${sqlIdentifier(node.alias || node.tableName)}.${sqlIdentifier(column)}`;
+      const alias = node.columnAliases?.[column]?.trim();
+      selectParts.push(alias ? `${expression} AS ${sqlIdentifier(alias)}` : expression);
+    }));
+    aggregates.forEach((aggregate) => {
+      const expression = `${aggregate.fn}(${aggregate.column === '*' ? '*' : `${sqlIdentifier(aggregate.table)}.${sqlIdentifier(aggregate.column)}`})`;
+      const proposedAlias = aggregate.alias?.trim() || `${aggregate.fn.toLowerCase()}_${aggregate.column === '*' ? 'all' : aggregate.column}`;
+      selectParts.push(`${expression} AS ${sqlIdentifier(proposedAlias)}`);
+    });
+  } else {
+    state.nodes.forEach((node) => {
+      const tablePrefix = node.alias || node.tableName;
+      if (node.selectedColumns && node.selectedColumns.length > 0) {
+        node.selectedColumns.forEach((col) => {
+          const expression = `${sqlIdentifier(tablePrefix)}.${sqlIdentifier(col)}`;
+          const alias = node.columnAliases?.[col]?.trim();
+          selectParts.push(alias ? `${expression} AS ${sqlIdentifier(alias)}` : expression);
+        });
+      }
+    });
+  }
 
   const selectClause = selectParts.length > 0 ? `SELECT ${selectParts.join(', ')}` : 'SELECT *';
 
@@ -36,8 +75,8 @@ export function buildSqlFromState(state: VisualQueryState): string {
 
   const firstNode = state.nodes[0];
   const firstTableExpr = firstNode.alias
-    ? `${firstNode.tableName} AS ${firstNode.alias}`
-    : firstNode.tableName;
+    ? `${sqlIdentifier(firstNode.tableName)} AS ${sqlIdentifier(firstNode.alias)}`
+    : sqlIdentifier(firstNode.tableName);
 
   const unjoinedNodes = state.nodes.slice(1).filter((n) => {
     const name = n.alias || n.tableName;
@@ -46,7 +85,9 @@ export function buildSqlFromState(state: VisualQueryState): string {
 
   const fromTableList = [firstTableExpr];
   unjoinedNodes.forEach((n) => {
-    const expr = n.alias ? `${n.tableName} AS ${n.alias}` : n.tableName;
+    const expr = n.alias
+      ? `${sqlIdentifier(n.tableName)} AS ${sqlIdentifier(n.alias)}`
+      : sqlIdentifier(n.tableName);
     fromTableList.push(expr);
   });
 
@@ -57,7 +98,7 @@ export function buildSqlFromState(state: VisualQueryState): string {
   state.joins.forEach((j) => {
     const joinTypeWord = j.joinType === 'FULL' ? 'FULL OUTER JOIN' : `${j.joinType} JOIN`;
     joinClauses.push(
-      `${joinTypeWord} ${j.rightTable} ON ${j.leftTable}.${j.leftColumn} = ${j.rightTable}.${j.rightColumn}`
+      `${joinTypeWord} ${tableSource(state, j.rightTable)} ON ${tableReference(state, j.leftTable)}.${sqlIdentifier(j.leftColumn)} ${j.operator || '='} ${tableReference(state, j.rightTable)}.${sqlIdentifier(j.rightColumn)}`
     );
   });
 
@@ -67,6 +108,7 @@ export function buildSqlFromState(state: VisualQueryState): string {
     if (f.table && f.column && f.operator) {
       let val = f.value;
       if (val !== undefined && val !== '') {
+        const field = `${tableReference(state, f.table)}.${sqlIdentifier(f.column)}`;
         if (f.operator === 'IN') {
           let formattedVal = val.trim();
           if (!formattedVal.startsWith('(')) {
@@ -78,12 +120,12 @@ export function buildSqlFromState(state: VisualQueryState): string {
             });
             formattedVal = `(${parts.join(', ')})`;
           }
-          whereParts.push(`${f.table}.${f.column} IN ${formattedVal}`);
+          whereParts.push(`${field} IN ${formattedVal}`);
         } else {
           const isNumeric = !isNaN(Number(val)) && val.trim() !== '';
           const formattedVal =
             isNumeric || val.startsWith("'") || val.toUpperCase() === 'NULL' ? val : `'${val}'`;
-          whereParts.push(`${f.table}.${f.column} ${f.operator} ${formattedVal}`);
+          whereParts.push(`${field} ${f.operator} ${formattedVal}`);
         }
       }
     }
@@ -96,11 +138,35 @@ export function buildSqlFromState(state: VisualQueryState): string {
   if (whereParts.length > 0) {
     sql += `\nWHERE ${whereParts.join(' AND ')}`;
   }
+  if (groupByParts.length > 0) {
+    sql += `\nGROUP BY ${groupByParts.join(', ')}`;
+  }
   if (state.limit !== undefined && state.limit > 0) {
     sql += `\nLIMIT ${state.limit}`;
   }
 
   return sql + ';';
+}
+
+export function describeRelationalEffects(state: VisualQueryState): string[] {
+  if (!state.nodes.length) return [];
+  const effects = [`FROM ${state.nodes.map((node) => `${node.tableName}${node.alias ? ` AS ${node.alias}` : ''}`).join(', ')}`];
+  state.joins.forEach((join) => effects.push(
+    `${join.joinType} JOIN ${join.rightTable} ON ${join.leftTable}.${join.leftColumn} ${join.operator || '='} ${join.rightTable}.${join.rightColumn}`
+  ));
+  if (state.filters.length) effects.push(`WHERE filters rows using ${state.filters.map((filter) => `${filter.table}.${filter.column} ${filter.operator} …`).join(' AND ')}`);
+  const groups = state.nodes.flatMap((node) => (node.groupByColumns || []).map((column) => `${node.alias || node.tableName}.${column}`));
+  if (groups.length) effects.push(`GROUP BY forms ${groups.length} group key${groups.length === 1 ? '' : 's'}: ${groups.join(', ')}`);
+  (state.aggregates || []).forEach((aggregate) => effects.push(
+    `${aggregate.fn} computes ${aggregate.fn}(${aggregate.column === '*' ? '*' : `${aggregate.table}.${aggregate.column}`})${aggregate.alias ? ` AS ${aggregate.alias}` : ''}`
+  ));
+  const projections = state.nodes.flatMap((node) => node.selectedColumns.map((column) => {
+    const alias = node.columnAliases?.[column];
+    return `${node.alias || node.tableName}.${column}${alias ? ` AS ${alias}` : ''}`;
+  }));
+  if (projections.length) effects.push(`SELECT projects ${projections.join(', ')}`);
+  if (state.limit && state.limit > 0) effects.push(`LIMIT keeps at most ${state.limit} result rows`);
+  return effects;
 }
 
 export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
@@ -116,6 +182,10 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
       filters: []
     }
   );
+  const queryStateRef = useRef(queryState);
+  queryStateRef.current = queryState;
+  const builderSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const builderTouched = useRef(false);
 
   const [selectedTableToAdd, setSelectedTableToAdd] = useState<string>(
     schema.tables[0]?.name || ''
@@ -127,7 +197,51 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
     }
   }, [schema]);
 
+  const applyPersistedBuilderState = (state: VisualQueryState, syncSql = true) => {
+    builderTouched.current = false;
+    queryStateRef.current = state;
+    setQueryState(state);
+    onStateChange?.(state);
+    if (syncSql) onSqlChange?.(buildSqlFromState(state));
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const restore = async () => {
+      try {
+        const workspace = await loadWorkspace();
+        if (!cancelled && !initialState && !builderTouched.current && workspace.builder) {
+          applyPersistedBuilderState(workspace.builder);
+        }
+      } catch {
+        // An unavailable workspace store should not block using the builder.
+      }
+    };
+    void restore();
+    const handleWorkspaceUpdated = () => {
+      void loadWorkspace().then((workspace) => {
+        if (workspace.builder) applyPersistedBuilderState(workspace.builder);
+        else applyPersistedBuilderState({ nodes: [], joins: [], filters: [] }, false);
+      }).catch(() => undefined);
+    };
+    window.addEventListener('sql-viewer-workspace-updated', handleWorkspaceUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('sql-viewer-workspace-updated', handleWorkspaceUpdated);
+      if (builderSaveTimer.current) clearTimeout(builderSaveTimer.current);
+      if (builderTouched.current) void saveBuilderState(queryStateRef.current);
+    };
+  }, []);
+
+  const scheduleBuilderSave = (state: VisualQueryState) => {
+    queryStateRef.current = state;
+    if (builderSaveTimer.current) clearTimeout(builderSaveTimer.current);
+    builderSaveTimer.current = setTimeout(() => void saveBuilderState(state), 250);
+  };
+
   const updateQueryState = (newState: VisualQueryState) => {
+    builderTouched.current = true;
+    scheduleBuilderSave(newState);
     setQueryState(newState);
     onStateChange?.(newState);
     const sql = buildSqlFromState(newState);
@@ -156,23 +270,58 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
     updateQueryState(newState);
   };
 
+  const handleUpdateTableAlias = (nodeId: string, requestedAlias: string) => {
+    const target = queryState.nodes.find((node) => node.id === nodeId);
+    if (!target) return;
+    const alias = requestedAlias.trim();
+    if (alias && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) return;
+    if (alias && queryState.nodes.some((node) => node.id !== nodeId &&
+        (node.alias === alias || (!node.alias && node.tableName === alias)))) return;
+    const oldRef = target.alias || target.tableName;
+    const newRef = alias || target.tableName;
+    const nodes = queryState.nodes.map((node) => node.id === nodeId ? { ...node, alias: alias || undefined } : node);
+    const joins = queryState.joins.map((join) => ({
+      ...join,
+      ...(join.leftTable === oldRef ? { leftTable: newRef } : {}),
+      ...(join.rightTable === oldRef ? { rightTable: newRef } : {}),
+    }));
+    const filters = queryState.filters.map((filter) => filter.table === oldRef ? { ...filter, table: newRef } : filter);
+    const aggregates = (queryState.aggregates || []).map((aggregate) => aggregate.table === oldRef
+      ? { ...aggregate, table: newRef } : aggregate);
+    updateQueryState({ ...queryState, nodes, joins, filters, aggregates });
+  };
+
+  const handleUpdateColumnAlias = (nodeId: string, column: string, alias: string) => {
+    const nodes = queryState.nodes.map((node) => {
+      if (node.id !== nodeId) return node;
+      const columnAliases = { ...node.columnAliases };
+      if (!alias.trim()) delete columnAliases[column];
+      else columnAliases[column] = alias.trim();
+      return { ...node, columnAliases };
+    });
+    updateQueryState({ ...queryState, nodes });
+  };
+
   const handleRemoveTableNode = (nodeId: string) => {
     const nodeToRemove = queryState.nodes.find((n) => n.id === nodeId);
     if (!nodeToRemove) return;
 
     const newNodes = queryState.nodes.filter((n) => n.id !== nodeId);
     // Remove joins referencing this table
+    const nodeNames = [nodeToRemove.tableName, nodeToRemove.alias].filter(Boolean);
     const newJoins = queryState.joins.filter(
-      (j) => j.leftTable !== nodeToRemove.tableName && j.rightTable !== nodeToRemove.tableName
+      (j) => !nodeNames.includes(j.leftTable) && !nodeNames.includes(j.rightTable)
     );
     // Remove filters referencing this table
     const newFilters = queryState.filters.filter((f) => f.table !== nodeToRemove.tableName);
+    const newAggregates = (queryState.aggregates || []).filter((aggregate) => !nodeNames.includes(aggregate.table));
 
     updateQueryState({
       ...queryState,
       nodes: newNodes,
       joins: newJoins,
-      filters: newFilters
+      filters: newFilters,
+      aggregates: newAggregates,
     });
   };
 
@@ -183,7 +332,15 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
       const newCols = isSelected
         ? node.selectedColumns.filter((c) => c !== colName)
         : [...node.selectedColumns, colName];
-      return { ...node, selectedColumns: newCols };
+      const groupByColumns = node.groupByColumns || [];
+      const shouldGroup = (queryState.aggregates || []).length > 0;
+      return {
+        ...node,
+        selectedColumns: newCols,
+        ...(shouldGroup ? { groupByColumns: isSelected
+          ? groupByColumns.filter((column) => column !== colName)
+          : groupByColumns.includes(colName) ? groupByColumns : [...groupByColumns, colName] } : {}),
+      };
     });
 
     updateQueryState({ ...queryState, nodes: newNodes });
@@ -193,18 +350,71 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
     const newNodes = queryState.nodes.map((node) => {
       if (node.id !== nodeId) return node;
       const isAllSelected = node.selectedColumns.length === allCols.length;
-      return { ...node, selectedColumns: isAllSelected ? [] : [...allCols] };
+      const selectedColumns = isAllSelected ? [] : [...allCols];
+      return {
+        ...node,
+        selectedColumns,
+        ...((queryState.aggregates || []).length > 0 ? {
+          groupByColumns: isAllSelected
+            ? (node.groupByColumns || []).filter((column) => !node.selectedColumns.includes(column))
+            : [...new Set([...(node.groupByColumns || []), ...selectedColumns])],
+        } : {}),
+      };
     });
 
     updateQueryState({ ...queryState, nodes: newNodes });
   };
 
-  const handleAddJoin = () => {
-    const firstTable = queryState.nodes[0]?.tableName || schema.tables[0]?.name || '';
-    const secondTable = queryState.nodes[1]?.tableName || schema.tables[1]?.name || firstTable;
+  const handleToggleGroupBy = (nodeId: string, column: string) => {
+    const newNodes = queryState.nodes.map((node) => {
+      if (node.id !== nodeId) return node;
+      const groupByColumns = node.groupByColumns || [];
+      return {
+        ...node,
+        groupByColumns: groupByColumns.includes(column)
+          ? groupByColumns.filter((name) => name !== column)
+          : [...groupByColumns, column],
+      };
+    });
+    updateQueryState({ ...queryState, nodes: newNodes });
+  };
 
-    const leftSchemaTable = schema.tables.find((t) => t.name === firstTable);
-    const rightSchemaTable = schema.tables.find((t) => t.name === secondTable);
+  const handleAddAggregate = () => {
+    const node = queryState.nodes[0];
+    const column = '*';
+    const aggregate: VisualAggregate = {
+      id: `aggregate-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      table: node?.alias || node?.tableName || schema.tables[0]?.name || '',
+      column,
+      fn: 'COUNT',
+    };
+    const nodes = queryState.nodes.map((item) => ({
+      ...item,
+      groupByColumns: [...new Set([...(item.groupByColumns || []), ...item.selectedColumns])],
+    }));
+    updateQueryState({ ...queryState, nodes, aggregates: [...(queryState.aggregates || []), aggregate] });
+  };
+
+  const handleUpdateAggregate = (id: string, updates: Partial<VisualAggregate>) => {
+    const aggregates = (queryState.aggregates || []).map((aggregate) =>
+      aggregate.id === id ? { ...aggregate, ...updates } : aggregate
+    );
+    updateQueryState({ ...queryState, aggregates });
+  };
+
+  const handleRemoveAggregate = (id: string) => {
+    updateQueryState({ ...queryState, aggregates: (queryState.aggregates || []).filter((aggregate) => aggregate.id !== id) });
+  };
+
+  const handleAddJoin = () => {
+    const firstNode = queryState.nodes[0];
+    const secondNode = queryState.nodes[1];
+    if (!firstNode || !secondNode) return;
+    const firstTable = firstNode.alias || firstNode.tableName;
+    const secondTable = secondNode.alias || secondNode.tableName;
+
+    const leftSchemaTable = schema.tables.find((t) => t.name === firstNode.tableName);
+    const rightSchemaTable = schema.tables.find((t) => t.name === secondNode.tableName);
 
     const leftCol = leftSchemaTable?.columns[0]?.name || '';
     const rightCol = rightSchemaTable?.columns[0]?.name || '';
@@ -215,7 +425,8 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
       leftColumn: leftCol,
       rightTable: secondTable,
       rightColumn: rightCol,
-      joinType: 'INNER'
+      joinType: 'INNER',
+      operator: '=',
     };
 
     updateQueryState({
@@ -235,8 +446,9 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
   };
 
   const handleAddFilter = () => {
-    const firstTable = queryState.nodes[0]?.tableName || schema.tables[0]?.name || '';
-    const tableObj = schema.tables.find((t) => t.name === firstTable);
+    const firstNode = queryState.nodes[0];
+    const firstTable = firstNode?.alias || firstNode?.tableName || schema.tables[0]?.name || '';
+    const tableObj = schema.tables.find((t) => t.name === firstNode?.tableName) || schema.tables.find((t) => t.name === firstTable);
     const col = tableObj?.columns[0]?.name || '';
 
     const newFilter: VisualFilterCondition = {
@@ -268,11 +480,13 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
       nodes: [],
       joins: [],
       filters: [],
+      aggregates: [],
       limit: undefined
     });
   };
 
   const generatedSql = buildSqlFromState(queryState);
+  const relationalEffects = describeRelationalEffects(queryState);
 
   return (
     <div className="flex flex-col h-full w-full bg-[#0B0D10] text-gray-200 overflow-y-auto p-4 space-y-4">
@@ -314,6 +528,7 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
           {/* Add Join */}
           <button
             onClick={handleAddJoin}
+            disabled={queryState.nodes.length < 2}
             className="px-2.5 py-1 text-xs font-medium bg-[#181C22] hover:bg-gray-800 text-gray-200 border border-gray-700 rounded transition flex items-center space-x-1"
           >
             <Link2 className="w-3.5 h-3.5 text-[#7C9CFF]" />
@@ -327,6 +542,15 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
           >
             <Filter className="w-3.5 h-3.5 text-[#7C9CFF]" />
             <span>Add Filter</span>
+          </button>
+
+          <button
+            onClick={handleAddAggregate}
+            disabled={queryState.nodes.length === 0}
+            className="px-2.5 py-1 text-xs font-medium bg-[#181C22] hover:bg-gray-800 text-gray-200 border border-gray-700 rounded transition flex items-center space-x-1 disabled:opacity-50"
+          >
+            <Sigma className="w-3.5 h-3.5 text-[#7C9CFF]" />
+            <span>Add Aggregate</span>
           </button>
 
           {/* Limit Input */}
@@ -385,11 +609,16 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
                       <span className="font-semibold text-xs text-gray-100 truncate">
                         {node.tableName}
                       </span>
-                      {node.alias && (
-                        <span className="text-[10px] text-gray-400 bg-gray-800 px-1 py-0.5 rounded font-mono">
-                          as {node.alias}
-                        </span>
-                      )}
+                  <label className="flex items-center gap-1 text-[10px] text-gray-400">
+                    alias
+                    <input
+                      aria-label={`Table alias for ${node.tableName}`}
+                      value={node.alias || ''}
+                      onChange={(event) => handleUpdateTableAlias(node.id, event.target.value)}
+                      placeholder="optional"
+                      className="w-20 bg-[#111418] border border-gray-700 rounded px-1 py-0.5 font-mono text-gray-200"
+                    />
+                  </label>
                     </div>
                     <button
                       onClick={() => handleRemoveTableNode(node.id)}
@@ -421,7 +650,7 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
                     {columns.map((col) => {
                       const isChecked = node.selectedColumns.includes(col.name);
                       return (
-                        <label
+                        <div
                           key={col.name}
                           className="flex items-center justify-between px-3 py-1.5 hover:bg-[#20252D] cursor-pointer text-xs text-gray-300"
                         >
@@ -438,7 +667,26 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
                           <span className="text-[10px] text-gray-500 font-mono">
                             {col.type}
                           </span>
-                        </label>
+                          <label className="flex items-center gap-1 text-[10px] text-gray-400" title="Include this column in GROUP BY">
+                            <input
+                              type="checkbox"
+                              aria-label={`Group by ${node.tableName}.${col.name}`}
+                              checked={(node.groupByColumns || []).includes(col.name)}
+                              onChange={() => handleToggleGroupBy(node.id, col.name)}
+                              className="rounded border-gray-600 text-[#7C9CFF] focus:ring-0 bg-gray-900 cursor-pointer"
+                            />
+                            Group
+                          </label>
+                          {(isChecked || (node.groupByColumns || []).includes(col.name)) && (
+                            <input
+                              aria-label={`Alias ${node.tableName}.${col.name}`}
+                              value={node.columnAliases?.[col.name] || ''}
+                              onChange={(event) => handleUpdateColumnAlias(node.id, col.name, event.target.value)}
+                              placeholder="column alias"
+                              className="w-24 bg-[#111418] border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200"
+                            />
+                          )}
+                        </div>
                       );
                     })}
                   </div>
@@ -459,10 +707,10 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
 
           <div className="space-y-2">
             {queryState.joins.map((j) => {
-              const leftCols =
-                schema.tables.find((t) => t.name === j.leftTable)?.columns.map((c) => c.name) || [];
-              const rightCols =
-                schema.tables.find((t) => t.name === j.rightTable)?.columns.map((c) => c.name) || [];
+              const leftNode = queryState.nodes.find((node) => (node.alias || node.tableName) === j.leftTable);
+              const rightNode = queryState.nodes.find((node) => (node.alias || node.tableName) === j.rightTable);
+              const leftCols = schema.tables.find((table) => table.name === leftNode?.tableName)?.columns.map((column) => column.name) || [];
+              const rightCols = schema.tables.find((table) => table.name === rightNode?.tableName)?.columns.map((column) => column.name) || [];
 
               return (
                 <div
@@ -476,14 +724,14 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
                       handleUpdateJoin(j.id, {
                         leftTable: e.target.value,
                         leftColumn:
-                          schema.tables.find((t) => t.name === e.target.value)?.columns[0]?.name || ''
+                          schema.tables.find((t) => t.name === queryState.nodes.find((node) => (node.alias || node.tableName) === e.target.value)?.tableName)?.columns[0]?.name || ''
                       })
                     }
                     className="bg-[#111418] border border-gray-700 text-gray-200 rounded px-2 py-1"
                   >
-                    {schema.tables.map((t) => (
-                      <option key={t.name} value={t.name}>
-                        {t.name}
+                    {queryState.nodes.map((node) => (
+                      <option key={node.id} value={node.alias || node.tableName}>
+                        {node.alias ? `${node.tableName} AS ${node.alias}` : node.tableName}
                       </option>
                     ))}
                   </select>
@@ -523,14 +771,14 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
                       handleUpdateJoin(j.id, {
                         rightTable: e.target.value,
                         rightColumn:
-                          schema.tables.find((t) => t.name === e.target.value)?.columns[0]?.name || ''
+                          schema.tables.find((t) => t.name === queryState.nodes.find((node) => (node.alias || node.tableName) === e.target.value)?.tableName)?.columns[0]?.name || ''
                       })
                     }
                     className="bg-[#111418] border border-gray-700 text-gray-200 rounded px-2 py-1"
                   >
-                    {schema.tables.map((t) => (
-                      <option key={t.name} value={t.name}>
-                        {t.name}
+                    {queryState.nodes.map((node) => (
+                      <option key={node.id} value={node.alias || node.tableName}>
+                        {node.alias ? `${node.tableName} AS ${node.alias}` : node.tableName}
                       </option>
                     ))}
                   </select>
@@ -547,6 +795,15 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
                     ))}
                   </select>
 
+                  <select
+                    aria-label="Join comparison"
+                    value={j.operator || '='}
+                    onChange={(e) => handleUpdateJoin(j.id, { operator: e.target.value as VisualJoinEdge['operator'] })}
+                    className="bg-[#20252D] font-mono text-[#7C9CFF] border border-gray-700 rounded px-2 py-1"
+                  >
+                    {['=', '!=', '>', '>=', '<', '<='].map((operator) => <option key={operator} value={operator}>{operator}</option>)}
+                  </select>
+
                   <button
                     onClick={() => handleRemoveJoin(j.id)}
                     className="text-gray-400 hover:text-red-400 p-1 rounded ml-auto"
@@ -561,6 +818,74 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
         </div>
       )}
 
+      {(queryState.aggregates || []).length > 0 && (
+        <div className="p-3 bg-[#111418] border border-gray-800 rounded-lg space-y-2">
+          <div className="flex items-center space-x-1.5 text-xs font-semibold text-gray-300 uppercase tracking-wider">
+            <Sigma className="w-4 h-4 text-[#7C9CFF]" />
+            <span>Aggregations</span>
+          </div>
+          {(queryState.aggregates || []).map((aggregate) => {
+            const node = queryState.nodes.find((item) => (item.alias || item.tableName) === aggregate.table);
+            const columns = schema.tables.find((item) => item.name === node?.tableName)?.columns || [];
+            const isNumeric = (type: string) => /INT|REAL|DOUBLE|DECIMAL|NUMERIC|FLOAT/i.test(type);
+            const availableColumns = aggregate.fn === 'SUM' || aggregate.fn === 'AVG'
+              ? columns.filter((column) => isNumeric(column.type)) : columns;
+            return (
+              <div key={aggregate.id} className="flex flex-wrap items-center gap-2 p-2 bg-[#181C22] border border-gray-700 rounded text-xs">
+                <select
+                  aria-label="Aggregate table"
+                  value={aggregate.table}
+                  onChange={(event) => {
+                    const nextNode = queryState.nodes.find((item) => (item.alias || item.tableName) === event.target.value);
+                    const nextColumns = schema.tables.find((table) => table.name === nextNode?.tableName)?.columns || [];
+                    const numericColumns = nextColumns.filter((column) => isNumeric(column.type));
+                    const nextColumn = aggregate.fn === 'COUNT' ? '*' :
+                      (aggregate.fn === 'SUM' || aggregate.fn === 'AVG' ? numericColumns[0]?.name : nextColumns[0]?.name) || '*';
+                    handleUpdateAggregate(aggregate.id, { table: event.target.value, column: nextColumn });
+                  }}
+                  className="bg-[#111418] border border-gray-700 text-gray-200 rounded px-2 py-1"
+                >
+                  {queryState.nodes.map((item) => <option key={item.id} value={item.alias || item.tableName}>{item.alias ? `${item.tableName} AS ${item.alias}` : item.tableName}</option>)}
+                </select>
+                <select
+                  aria-label="Aggregate function"
+                  value={aggregate.fn}
+                  onChange={(event) => {
+                    const fn = event.target.value as VisualAggregate['fn'];
+                    const options = fn === 'SUM' || fn === 'AVG' ? columns.filter((column) => isNumeric(column.type)) : columns;
+                    const currentValid = options.some((column) => column.name === aggregate.column);
+                    handleUpdateAggregate(aggregate.id, { fn, ...(!currentValid && options[0] ? { column: options[0].name } : {}) });
+                  }}
+                  className="bg-[#20252D] text-[#7C9CFF] border border-gray-700 rounded px-2 py-1"
+                >
+                  {(['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'] as const).map((fn) => <option key={fn} value={fn} disabled={(fn === 'SUM' || fn === 'AVG') && !columns.some((column) => isNumeric(column.type))}>{fn}</option>)}
+                </select>
+                <select
+                  aria-label="Aggregate column"
+                  value={aggregate.column}
+                  onChange={(event) => handleUpdateAggregate(aggregate.id, { column: event.target.value })}
+                  className="bg-[#111418] border border-gray-700 text-gray-200 rounded px-2 py-1"
+                >
+                  {aggregate.fn === 'COUNT' && <option value="*">*</option>}
+                  {availableColumns.map((column) => <option key={column.name} value={column.name}>{aggregate.table}.{column.name}</option>)}
+                </select>
+                <span className="text-gray-500">AS</span>
+                <input
+                  aria-label="Aggregate alias"
+                  value={aggregate.alias || ''}
+                  placeholder={`${aggregate.fn.toLowerCase()}_${aggregate.column === '*' ? 'all' : aggregate.column}`}
+                  onChange={(event) => handleUpdateAggregate(aggregate.id, { alias: event.target.value })}
+                  className="bg-[#111418] border border-gray-700 text-gray-200 rounded px-2 py-1 min-w-32"
+                />
+                <button onClick={() => handleRemoveAggregate(aggregate.id)} className="text-gray-400 hover:text-red-400 p-1 rounded ml-auto" title="Remove Aggregate">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Filters Section */}
       {queryState.filters.length > 0 && (
         <div className="p-3 bg-[#111418] border border-gray-800 rounded-lg space-y-2">
@@ -571,8 +896,8 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
 
           <div className="space-y-2">
             {queryState.filters.map((f) => {
-              const availableCols =
-                schema.tables.find((t) => t.name === f.table)?.columns.map((c) => c.name) || [];
+              const filterNode = queryState.nodes.find((node) => (node.alias || node.tableName) === f.table);
+              const availableCols = schema.tables.find((table) => table.name === filterNode?.tableName || table.name === f.table)?.columns.map((column) => column.name) || [];
 
               return (
                 <div
@@ -584,15 +909,14 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
                     onChange={(e) =>
                       handleUpdateFilter(f.id, {
                         table: e.target.value,
-                        column:
-                          schema.tables.find((t) => t.name === e.target.value)?.columns[0]?.name || ''
+                        column: schema.tables.find((table) => table.name === queryState.nodes.find((node) => (node.alias || node.tableName) === e.target.value)?.tableName || table.name === e.target.value)?.columns[0]?.name || ''
                       })
                     }
                     className="bg-[#111418] border border-gray-700 text-gray-200 rounded px-2 py-1"
                   >
-                    {schema.tables.map((t) => (
-                      <option key={t.name} value={t.name}>
-                        {t.name}
+                    {(queryState.nodes.length ? queryState.nodes.map((node) => ({ name: node.alias || node.tableName, label: node.alias ? `${node.tableName} AS ${node.alias}` : node.tableName })) : schema.tables.map((table) => ({ name: table.name, label: table.name }))).map((table) => (
+                      <option key={table.name} value={table.name}>
+                        {table.label}
                       </option>
                     ))}
                   </select>
@@ -659,6 +983,14 @@ export const VisualQueryBuilder: React.FC<VisualQueryBuilderProps> = ({
         <pre className="p-3 bg-[#0B0D10] text-[#7C9CFF] font-mono text-xs rounded border border-gray-800 overflow-x-auto whitespace-pre-wrap">
           {generatedSql || '-- Build your visual query above to see SQL generated here'}
         </pre>
+      </div>
+      <div className="p-3 bg-[#111418] border border-gray-800 rounded-lg space-y-2">
+        <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">RELATIONAL EFFECTS</div>
+        {relationalEffects.length ? (
+          <ol className="space-y-1 text-xs text-gray-300">
+            {relationalEffects.map((effect, index) => <li key={`${index}-${effect}`}><span className="mr-2 font-mono text-[#7C9CFF]">{index + 1}.</span>{effect}</li>)}
+          </ol>
+        ) : <p className="text-xs text-gray-500">Add tables and builder choices to preview their relational effects.</p>}
       </div>
     </div>
   );

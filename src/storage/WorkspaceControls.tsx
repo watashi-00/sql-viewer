@@ -5,6 +5,10 @@ import { useWorkspaceStore, DEFAULT_QUERY } from '../state/useWorkspaceStore';
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './workspaceStore';
 import { parseWorkspaceArchive, serializeWorkspaceArchive } from './workspaceArchive';
 
+function notifyWorkspaceChanged() {
+  window.dispatchEvent(new Event('sql-viewer-workspace-updated'));
+}
+
 export const WorkspaceControls: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
@@ -26,6 +30,7 @@ export const WorkspaceControls: React.FC = () => {
       await clearWorkspace();
       await restartDatabase();
       setSql(DEFAULT_QUERY);
+      notifyWorkspaceChanged();
       setMessage('New workspace ready. Query history was kept.');
     } catch (error) {
       setMessage(`Could not create a new workspace: ${error instanceof Error ? error.message : String(error)}`);
@@ -41,6 +46,7 @@ export const WorkspaceControls: React.FC = () => {
     try {
       await clearWorkspace();
       await restartDatabase();
+      notifyWorkspaceChanged();
       setMessage('Local workspace cleared. Query history was kept.');
     } catch (error) {
       setMessage(`Could not clear the workspace: ${error instanceof Error ? error.message : String(error)}`);
@@ -95,6 +101,7 @@ export const WorkspaceControls: React.FC = () => {
         }
         throw new Error(`The archive could not be restored. The previous workspace was restored. ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`);
       }
+      notifyWorkspaceChanged();
       setMessage('Workspace imported and restored. Query history was kept.');
     } catch (error) {
       setMessage(`Could not import the workspace: ${error instanceof Error ? error.message : String(error)}`);

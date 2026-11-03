@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseWorkspaceArchive, serializeWorkspaceArchive } from '../storage/workspaceArchive';
+import { VisualQueryState } from '../types';
 
 describe('Workspace archive', () => {
   it('round trips file bytes and ordered SQL operations as versioned JSON', () => {
@@ -12,16 +13,21 @@ describe('Workspace archive', () => {
         { type: 'sql' as const, statements: ['INSERT INTO people VALUES (1)'] },
       ],
       editor: { sql: 'SELECT * FROM people;', selection: { start: 7, end: 9 } },
+      builder: {
+        nodes: [{ id: 'n1', tableName: 'people', alias: 'p', selectedColumns: ['name'], groupByColumns: ['name'], position: { x: 0, y: 0 } }],
+        joins: [], filters: [], aggregates: [{ id: 'a1', table: 'p', column: '*', fn: 'COUNT', alias: 'people_count' }],
+      } satisfies VisualQueryState,
     };
 
     const serialized = serializeWorkspaceArchive(workspace);
-    expect(JSON.parse(serialized).version).toBe(2);
+    expect(JSON.parse(serialized).version).toBe(3);
     expect(JSON.parse(serialized).workspace.operations[0].fileIndex).toBe(0);
     const restored = parseWorkspaceArchive(serialized);
     expect(Array.from(restored.files[0].buffer)).toEqual([0, 1, 255, 42]);
     expect(restored.commands).toEqual(workspace.commands);
     expect(restored.operations?.[2]).toEqual(workspace.operations[2]);
     expect(restored.editor).toEqual(workspace.editor);
+    expect(restored.builder).toEqual(workspace.builder);
   });
 
   it.each([

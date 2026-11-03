@@ -7,9 +7,20 @@ import {
   replayWorkspaceOperations,
   saveWorkspace,
   appendWorkspaceOperation,
+  saveBuilderState,
 } from '../storage/workspaceStore';
 
 describe('Workspace storage', () => {
+  it('persists visual query builder state in the local workspace', async () => {
+    await clearWorkspace();
+    const builder = {
+      nodes: [{ id: 'n1', tableName: 'movies', alias: 'm', selectedColumns: [], groupByColumns: ['release_year'], position: { x: 0, y: 0 } }],
+      joins: [], filters: [], aggregates: [{ id: 'a1', table: 'm', column: '*', fn: 'COUNT' as const }],
+    };
+    await saveBuilderState(builder);
+    expect((await loadWorkspace()).builder).toEqual(builder);
+  });
+
   it('persists imported files and creation commands in IndexedDB', async () => {
     await clearWorkspace();
 

@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { recordQueryExecution } from '../debugger/executionRecorder';
 import { executeQuery, resetDatabase } from '../database/duckdb';
+import { buildSqlFromState } from '../builder/VisualQueryBuilder';
 
 function canonicalRows(rows: Record<string, unknown>[]): string[] {
   return rows
@@ -72,6 +73,34 @@ describe('Execution recorder differential checks', () => {
 
     expect(finalStage, 'SELECT query should have a recorded final stage').toBeDefined();
     expect(canonicalRows(finalStage!.outputRows)).toEqual(canonicalRows(expected.rows));
+    expect(canonicalRows(plan.finalResult)).toEqual(canonicalRows(expected.rows));
+  });
+
+  it('executes builder-generated grouped aggregates through DuckDB and the debugger', async () => {
+    const sql = buildSqlFromState({
+      nodes: [{ id: 'left', tableName: 'differential_left', alias: 'd', selectedColumns: [], groupByColumns: ['grp'], position: { x: 0, y: 0 } }],
+      joins: [],
+      filters: [],
+      aggregates: [
+        { id: 'count', table: 'd', column: '*', fn: 'COUNT', alias: 'row_count' },
+        { id: 'sum', table: 'd', column: 'value', fn: 'SUM', alias: 'total' },
+      ],
+    });
+    const [plan, expected] = await Promise.all([recordQueryExecution(sql), executeQuery(sql)]);
+    expect(canonicalRows(plan.finalResult)).toEqual(canonicalRows(expected.rows));
+    expect(plan.events.some((event) => event.stage === 'GROUP BY')).toBe(true);
+  });
+
+  it('executes builder-generated table aliases and join predicates', async () => {
+    const sql = buildSqlFromState({
+      nodes: [
+        { id: 'left', tableName: 'differential_left', alias: 'l', selectedColumns: ['id'], position: { x: 0, y: 0 } },
+        { id: 'right', tableName: 'differential_right', alias: 'r', selectedColumns: ['score'], position: { x: 0, y: 0 } },
+      ],
+      joins: [{ id: 'join', leftTable: 'l', leftColumn: 'id', rightTable: 'r', rightColumn: 'left_id', joinType: 'LEFT', operator: '=' }],
+      filters: [],
+    });
+    const [plan, expected] = await Promise.all([recordQueryExecution(sql), executeQuery(sql)]);
     expect(canonicalRows(plan.finalResult)).toEqual(canonicalRows(expected.rows));
   });
 });

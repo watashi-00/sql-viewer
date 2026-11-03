@@ -1,10 +1,11 @@
+import type { VisualQueryState } from '../types';
+
 export interface PersistedWorkspaceFile {
   fileName: string;
   tableName: string;
   format: 'csv' | 'json' | 'parquet';
   buffer: Uint8Array;
 }
-
 export interface PersistedWorkspaceCommand {
   sql: string;
   tableName?: string;
@@ -25,6 +26,7 @@ export interface PersistedWorkspace {
   /** Ordered log used by new workspaces; absent in records created by older versions. */
   operations?: PersistedWorkspaceOperation[];
   editor?: PersistedEditorState;
+  builder?: VisualQueryState;
 }
 
 const DB_NAME = 'sql_viewer_workspace';
@@ -53,6 +55,45 @@ function isPersistedOperation(value: unknown): value is PersistedWorkspaceOperat
   return operation.type === 'sql' && Array.isArray(operation.statements) && operation.statements.length > 0 &&
     operation.statements.every((statement) => typeof statement === 'string' && statement.trim().length > 0) &&
     (operation.tableName === undefined || typeof operation.tableName === 'string');
+}
+
+export function isBuilderState(value: unknown): value is VisualQueryState {
+  if (!value || typeof value !== 'object') return false;
+  const state = value as Record<string, unknown>;
+  if (!Array.isArray(state.nodes) || !Array.isArray(state.joins) || !Array.isArray(state.filters)) return false;
+  if (!state.nodes.every((node) => {
+    if (!node || typeof node !== 'object') return false;
+    const item = node as Record<string, unknown>;
+    return typeof item.id === 'string' && typeof item.tableName === 'string' &&
+      (item.alias === undefined || typeof item.alias === 'string') && Array.isArray(item.selectedColumns) &&
+      item.selectedColumns.every((column) => typeof column === 'string') &&
+      (item.groupByColumns === undefined || (Array.isArray(item.groupByColumns) && item.groupByColumns.every((column) => typeof column === 'string'))) &&
+      (!item.position || (typeof item.position === 'object' && typeof (item.position as Record<string, unknown>).x === 'number' && typeof (item.position as Record<string, unknown>).y === 'number')) &&
+      (item.columnAliases === undefined || (typeof item.columnAliases === 'object' && item.columnAliases !== null &&
+        Object.values(item.columnAliases as Record<string, unknown>).every((alias) => typeof alias === 'string')));
+  })) return false;
+  if (!state.joins.every((join) => {
+    if (!join || typeof join !== 'object') return false;
+    const item = join as Record<string, unknown>;
+    return typeof item.id === 'string' && typeof item.leftTable === 'string' && typeof item.leftColumn === 'string' &&
+      typeof item.rightTable === 'string' && typeof item.rightColumn === 'string' &&
+      ['INNER', 'LEFT', 'RIGHT', 'FULL'].includes(String(item.joinType)) &&
+      (item.operator === undefined || ['=', '!=', '>', '>=', '<', '<='].includes(String(item.operator)));
+  })) return false;
+  if (!state.filters.every((filter) => {
+    if (!filter || typeof filter !== 'object') return false;
+    const item = filter as Record<string, unknown>;
+    return typeof item.id === 'string' && typeof item.table === 'string' && typeof item.column === 'string' &&
+      typeof item.value === 'string' && ['=', '!=', '>', '>=', '<', '<=', 'LIKE', 'IN'].includes(String(item.operator));
+  })) return false;
+  if (state.aggregates !== undefined && (!Array.isArray(state.aggregates) || !state.aggregates.every((aggregate) => {
+    if (!aggregate || typeof aggregate !== 'object') return false;
+    const item = aggregate as Record<string, unknown>;
+    return typeof item.id === 'string' && typeof item.table === 'string' && typeof item.column === 'string' &&
+      (item.alias === undefined || typeof item.alias === 'string') && ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'].includes(String(item.fn));
+  }))) return false;
+  if (state.limit !== undefined && (typeof state.limit !== 'number' || !Number.isFinite(state.limit))) return false;
+  return true;
 }
 
 function openDB(): Promise<IDBDatabase | null> {
@@ -105,7 +146,8 @@ function validateStoredWorkspace(value: unknown): PersistedWorkspace {
         typeof (candidate.editor as Record<string, unknown>).sql !== 'string' ||
         !(candidate.editor as Record<string, unknown>).selection ||
         typeof ((candidate.editor as Record<string, unknown>).selection as Record<string, unknown>).start !== 'number' ||
-        typeof ((candidate.editor as Record<string, unknown>).selection as Record<string, unknown>).end !== 'number'))) {
+        typeof ((candidate.editor as Record<string, unknown>).selection as Record<string, unknown>).end !== 'number')) ||
+      (candidate.builder !== undefined && !isBuilderState(candidate.builder))) {
     throw new Error('Saved workspace data is corrupted. Clear it or import a valid backup.');
   }
   if (!candidate.files.every(isPersistedFile)) {
@@ -123,10 +165,24 @@ function validateStoredWorkspace(value: unknown): PersistedWorkspace {
   return value as PersistedWorkspace;
 }
 
+let metadataSaveQueue: Promise<void> = Promise.resolve();
+
+async function saveWorkspaceMetadata(patch: Pick<PersistedWorkspace, 'editor' | 'builder'>): Promise<void> {
+  const save = metadataSaveQueue.then(async () => {
+    const workspace = await loadWorkspace();
+    Object.assign(workspace, structuredClone(patch));
+    await saveWorkspace(workspace);
+  });
+  metadataSaveQueue = save.catch(() => undefined);
+  await save;
+}
+
 export async function saveEditorState(editor: PersistedEditorState): Promise<void> {
-  const workspace = await loadWorkspace();
-  workspace.editor = structuredClone(editor);
-  await saveWorkspace(workspace);
+  await saveWorkspaceMetadata({ editor });
+}
+
+export async function saveBuilderState(builder: VisualQueryState): Promise<void> {
+  await saveWorkspaceMetadata({ builder });
 }
 
 export async function saveWorkspace(workspace: PersistedWorkspace): Promise<void> {

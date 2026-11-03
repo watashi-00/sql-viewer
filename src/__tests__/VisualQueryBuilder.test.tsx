@@ -1,8 +1,10 @@
+import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React, { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
-import { VisualQueryBuilder } from '../builder/VisualQueryBuilder';
-import { Schema } from '../types';
+import { buildSqlFromState, describeRelationalEffects, VisualQueryBuilder } from '../builder/VisualQueryBuilder';
+import { Schema, VisualQueryState } from '../types';
+import { clearWorkspace, loadWorkspace, saveBuilderState } from '../storage/workspaceStore';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -45,6 +47,81 @@ describe('VisualQueryBuilder Component', () => {
     });
     container.remove();
     vi.restoreAllMocks();
+  });
+
+  it('builds aggregate queries with grouping, aliases, and filters', () => {
+    const sql = buildSqlFromState({
+      nodes: [{ id: 'movies', tableName: 'movies', alias: 'm', selectedColumns: [], groupByColumns: ['release_year'], position: { x: 0, y: 0 } }],
+      joins: [],
+      filters: [{ id: 'f1', table: 'm', column: 'release_year', operator: '>=', value: '2000' }],
+      aggregates: [{ id: 'a1', table: 'm', column: '*', fn: 'COUNT', alias: 'movie_count' }],
+    });
+    expect(sql).toContain('SELECT m.release_year, COUNT(*) AS movie_count');
+    expect(sql).toContain('WHERE m.release_year >= 2000');
+    expect(sql).toContain('GROUP BY m.release_year');
+  });
+
+  it('generates table and expression aliases with editable join predicates', () => {
+    const sql = buildSqlFromState({
+      nodes: [
+        { id: 'm', tableName: 'movies', alias: 'm', selectedColumns: ['title'], columnAliases: { title: 'movie_title' }, position: { x: 0, y: 0 } },
+        { id: 'r', tableName: 'reviews', alias: 'r', selectedColumns: [], position: { x: 0, y: 0 } },
+      ],
+      joins: [{ id: 'j', leftTable: 'm', leftColumn: 'movie_id', rightTable: 'r', rightColumn: 'movie_id', joinType: 'LEFT', operator: '>' }],
+      filters: [],
+    });
+    expect(sql).toContain('SELECT m.title AS movie_title');
+    expect(sql).toContain('FROM movies AS m');
+    expect(sql).toContain('LEFT JOIN reviews AS r ON m.movie_id > r.movie_id');
+    expect(describeRelationalEffects({ nodes: [], joins: [], filters: [] })).toEqual([]);
+  });
+
+  it('adds aggregate expressions and lets columns be marked for GROUP BY', () => {
+    const onSqlChange = vi.fn();
+    act(() => root.render(React.createElement(VisualQueryBuilder, {
+      schema: mockSchema,
+      onSqlChange,
+      initialState: {
+        nodes: [{ id: 'movies', tableName: 'movies', selectedColumns: [], position: { x: 0, y: 0 } }],
+        joins: [],
+        filters: [],
+      },
+    })));
+    const groupBy = container.querySelector('input[aria-label="Group by movies.release_year"]') as HTMLInputElement;
+    act(() => groupBy.click());
+    const addAggregate = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Add Aggregate'));
+    act(() => addAggregate?.click());
+    const sql = onSqlChange.mock.calls.at(-1)?.[0] as string;
+    expect(sql).toContain('COUNT(*) AS count_all');
+    expect(sql).toContain('GROUP BY movies.release_year');
+  });
+
+  it('restores builder selections from the workspace after remounting', async () => {
+    await clearWorkspace();
+    await saveBuilderState({
+      nodes: [{ id: 'movies', tableName: 'movies', selectedColumns: [], groupByColumns: ['release_year'], position: { x: 0, y: 0 } }],
+      joins: [], filters: [], aggregates: [{ id: 'count', table: 'movies', column: '*', fn: 'COUNT' }],
+    });
+    expect((await loadWorkspace()).builder?.nodes[0]?.groupByColumns).toEqual(['release_year']);
+    const onSqlChange = vi.fn();
+    let restoredState: VisualQueryState | undefined;
+    let resolveRestored!: () => void;
+    const restored = new Promise<void>((resolve) => { resolveRestored = resolve; });
+    act(() => {
+      root.render(React.createElement(VisualQueryBuilder, {
+        schema: mockSchema,
+        onSqlChange,
+        onStateChange: (state) => { restoredState = state; resolveRestored(); },
+      }));
+    });
+    await restored;
+    act(() => root.render(React.createElement(VisualQueryBuilder, {
+      schema: mockSchema,
+      onSqlChange,
+      onStateChange: (state) => { restoredState = state; resolveRestored(); },
+    })));
+    expect(restoredState?.nodes[0].groupByColumns).toEqual(['release_year']);
+    expect(onSqlChange.mock.calls.some(([sql]) => String(sql).includes('GROUP BY movies.release_year'))).toBe(true);
   });
 
   it('renders table selection and header', () => {
