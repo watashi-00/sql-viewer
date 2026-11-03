@@ -223,10 +223,11 @@ describe('App Component Layout and Integration', () => {
     expect(header).not.toBeNull();
     expect(header?.className).toContain('h-10');
 
-    // Left sidebar container
-    const sidebar = container.querySelector('.w-64');
+    // Left sidebar uses a persisted, resizable inline width.
+    const sidebar = container.querySelector('main aside');
     expect(sidebar).not.toBeNull();
-    expect(sidebar?.contains(container.querySelector('div:has(> span)')!)).toBeDefined();
+    expect((sidebar as HTMLElement).style.width).toBeTruthy();
+    expect(sidebar?.textContent).toContain('DATABASE EXPLORER');
   });
 
   it('renders center main workspace tab header [ Monaco SQL Editor | Visual Query Builder ] and switches view', () => {
