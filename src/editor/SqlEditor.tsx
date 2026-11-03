@@ -17,7 +17,10 @@ export const SQL_DARK_THEME_NAME = 'sql-dark';
 export const SQL_DARK_THEME_DATA = {
   base: 'vs-dark' as const,
   inherit: true,
-  rules: [],
+  rules: [
+    { token: 'string', foreground: 'D7BA7D' },
+    { token: 'string.sql', foreground: 'D7BA7D' },
+  ],
   colors: {
     'editor.background': '#0B0D10',
     'editor.lineHighlightBackground': '#111418',
@@ -30,7 +33,10 @@ export const SQL_LIGHT_THEME_NAME = 'sql-light';
 export const SQL_LIGHT_THEME_DATA = {
   base: 'vs' as const,
   inherit: true,
-  rules: [],
+  rules: [
+    { token: 'string', foreground: '8A6428' },
+    { token: 'string.sql', foreground: '8A6428' },
+  ],
   colors: {
     'editor.background': '#FFFFFF',
     'editor.foreground': '#18212A',
@@ -44,7 +50,10 @@ export const SQL_NOIR_THEME_NAME = 'sql-noir';
 export const SQL_NOIR_THEME_DATA = {
   base: 'vs-dark' as const,
   inherit: true,
-  rules: [],
+  rules: [
+    { token: 'string', foreground: 'E1C27A' },
+    { token: 'string.sql', foreground: 'E1C27A' },
+  ],
   colors: {
     'editor.background': '#050608',
     'editor.foreground': '#EEF0F2',
@@ -58,7 +67,10 @@ export const SQL_OCEAN_THEME_NAME = 'sql-ocean';
 export const SQL_OCEAN_THEME_DATA = {
   base: 'vs-dark' as const,
   inherit: true,
-  rules: [],
+  rules: [
+    { token: 'string', foreground: '9FC7A0' },
+    { token: 'string.sql', foreground: '9FC7A0' },
+  ],
   colors: {
     'editor.background': '#07111D',
     'editor.foreground': '#E1F0FF',

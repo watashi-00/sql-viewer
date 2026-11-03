@@ -1,7 +1,7 @@
 import React, { act, useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
-import { SqlEditor } from '../editor/SqlEditor';
+import { SqlEditor, SQL_DARK_THEME_DATA, SQL_LIGHT_THEME_DATA, SQL_NOIR_THEME_DATA, SQL_OCEAN_THEME_DATA } from '../editor/SqlEditor';
 import { DEFAULT_QUERY, useWorkspaceStore } from '../state/useWorkspaceStore';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -46,6 +46,14 @@ describe('SqlEditor diagnostics', () => {
       lastExecutionMode: null,
       runQuery: originalRunQuery,
     });
+  });
+
+  it('uses readable non-error colors for SQL string tokens in every theme', () => {
+    for (const theme of [SQL_DARK_THEME_DATA, SQL_LIGHT_THEME_DATA, SQL_NOIR_THEME_DATA, SQL_OCEAN_THEME_DATA]) {
+      expect(theme.rules).toEqual(expect.arrayContaining([
+        expect.objectContaining({ token: 'string.sql', foreground: expect.not.stringMatching(/^FF0000$/i) }),
+      ]));
+    }
   });
 
   it('renders the actionable error and updates the Monaco marker', () => {
