@@ -7,7 +7,7 @@ import { DistinctVisualizer } from './DistinctVisualizer';
 import { CteVisualizer } from './CteVisualizer';
 import { SubqueryVisualizer } from './SubqueryVisualizer';
 import { ExplainTreeVisualizer } from './ExplainTreeVisualizer';
-import { Play, SkipBack, SkipForward, RotateCcw, CheckCircle2, Circle, ArrowRight } from 'lucide-react';
+import { Play, SkipBack, SkipForward, RotateCcw, CheckCircle2, ArrowRight } from 'lucide-react';
 
 export const ExecutionVisualizer: React.FC = () => {
   const [viewMode, setViewMode] = useState<'relational' | 'explain'>('relational');
@@ -26,6 +26,13 @@ export const ExecutionVisualizer: React.FC = () => {
   } = useWorkspaceStore();
 
   const currentEvent = executionPlan?.events[currentStageIndex];
+  const stageOutcome = currentEvent?.rejectedRows !== undefined
+    ? { label: 'REJECTED ROWS', value: currentEvent.rejectedRows.length }
+    : currentEvent?.distinctDuplicatesRemoved !== undefined
+    ? { label: 'DUPLICATES REMOVED', value: currentEvent.distinctDuplicatesRemoved }
+    : currentEvent?.rejectedGroupBuckets !== undefined
+    ? { label: 'REJECTED GROUPS', value: currentEvent.rejectedGroupBuckets.length }
+    : undefined;
 
   return (
     <div className="h-full w-full flex flex-col bg-base text-primary font-sans select-none border-b border-border">
@@ -39,8 +46,10 @@ export const ExecutionVisualizer: React.FC = () => {
         </div>
 
         {/* View Mode Toggle Switch */}
-        <div className="flex items-center bg-surface-secondary p-0.5 rounded border border-border">
+        <div role="group" aria-label="Debugger view mode" className="flex items-center bg-surface-secondary p-0.5 rounded border border-border">
           <button
+            type="button"
+            aria-pressed={viewMode === 'relational'}
             onClick={() => setViewMode('relational')}
             className={`px-2.5 py-1 rounded text-xs font-mono font-medium transition-all ${
               viewMode === 'relational'
@@ -51,6 +60,8 @@ export const ExecutionVisualizer: React.FC = () => {
             Relational Pipeline
           </button>
           <button
+            type="button"
+            aria-pressed={viewMode === 'explain'}
             onClick={() => setViewMode('explain')}
             className={`px-2.5 py-1 rounded text-xs font-mono font-medium transition-all ${
               viewMode === 'explain'
@@ -105,30 +116,55 @@ export const ExecutionVisualizer: React.FC = () => {
       ) : (
         <>
           {/* Stage Pipeline Node Bar */}
-          <div className="flex items-center gap-2 px-4 py-3 bg-surface border-b border-border overflow-x-auto">
+          <div className="flex items-stretch gap-2 px-4 py-3 bg-surface border-b border-border overflow-x-auto">
             {stages.length === 0 ? (
-              <div className="text-xs text-muted font-mono">No query executed. Press Run to start debugging pipeline.</div>
+              <div className="flex min-h-[64px] w-full items-center justify-center rounded-lg border border-dashed border-border bg-surface-secondary/50 px-4 text-center text-xs text-muted">
+                No query executed. Press Run to start debugging pipeline.
+              </div>
             ) : (
               stages.map((stg, idx) => {
                 const isActive = idx === currentStageIndex;
                 const isDone = idx < currentStageIndex;
+                const stageEvent = executionPlan?.events[idx];
 
                 return (
                   <React.Fragment key={`${stg}-${idx}`}>
-                    <div
+                    <button
+                      type="button"
+                      aria-current={isActive ? 'step' : undefined}
+                      aria-label={`${stg}, step ${idx + 1} of ${stages.length}, ${stageEvent?.outputRows.length ?? 0} output rows`}
                       onClick={() => jumpToStage(idx)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-mono cursor-pointer transition-all ${
+                      className={`group flex min-w-[112px] cursor-pointer flex-col gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                         isActive
-                          ? 'bg-accent/15 border-accent text-accent font-bold shadow-sm'
+                          ? 'bg-accent/10 border-accent/70 text-primary shadow-sm ring-1 ring-accent/20'
                           : isDone
-                          ? 'bg-surface-secondary border-border text-success'
-                          : 'bg-surface border-border text-muted hover:text-secondary'
+                          ? 'bg-surface-secondary border-border text-primary hover:border-success/50'
+                          : 'bg-base border-border text-secondary hover:border-secondary'
                       }`}
                     >
-                      {isDone ? <CheckCircle2 size={12} /> : <Circle size={12} />}
-                      <span>{stg}</span>
-                    </div>
-                    {idx < stages.length - 1 && <ArrowRight size={12} className="text-muted shrink-0" />}
+                      <span className="flex items-center gap-2 font-mono font-semibold">
+                        <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
+                          isActive ? 'bg-accent text-base' : isDone ? 'bg-success/15 text-success' : 'bg-surface-secondary text-muted'
+                        }`}>
+                          {isDone ? <CheckCircle2 size={13} /> : idx + 1}
+                        </span>
+                        {stg}
+                      </span>
+                      <span className="flex items-baseline justify-between gap-2 border-t border-border/70 pt-1.5 font-mono">
+                        <span className="text-[10px] text-muted">OUTPUT</span>
+                        <span className={isActive ? 'text-accent' : 'text-secondary'}>
+                          {stageEvent?.outputRows.length ?? 0} rows
+                        </span>
+                      </span>
+                      {stageEvent?.durationMs !== undefined && (
+                        <span className="text-right font-mono text-[10px] text-muted">{stageEvent.durationMs} ms</span>
+                      )}
+                    </button>
+                    {idx < stages.length - 1 && (
+                      <div className="flex min-w-4 items-center justify-center text-muted" aria-hidden="true">
+                        <ArrowRight size={14} />
+                      </div>
+                    )}
                   </React.Fragment>
                 );
               })
@@ -147,37 +183,44 @@ export const ExecutionVisualizer: React.FC = () => {
             )}
 
             {currentEvent ? (
-              <div className="bg-surface border border-border rounded p-4 space-y-4">
-                <div className="flex items-center justify-between border-b border-border pb-2">
-                  <div>
+              <section className="rounded-xl border border-border bg-surface p-4 shadow-sm">
+                <div className="mb-4 flex items-start justify-between gap-3 border-b border-border pb-3">
+                  <div className="min-w-0">
+                    <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-muted">
+                      Step {currentStageIndex + 1} of {stages.length}
+                    </div>
                     <h3 className="text-sm font-semibold text-primary">{currentEvent.title}</h3>
-                    <p className="text-xs text-secondary">{currentEvent.description}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-secondary">{currentEvent.description}</p>
                   </div>
                   {currentEvent.durationMs !== undefined && (
-                    <span className="text-xs font-mono text-muted">{currentEvent.durationMs} ms</span>
+                    <span className="shrink-0 rounded-md bg-surface-secondary px-2 py-1 text-xs font-mono text-muted">
+                      {currentEvent.durationMs} ms
+                    </span>
                   )}
                 </div>
 
                 {/* Metrics */}
-                <div className="grid grid-cols-3 gap-3 text-xs font-mono">
-                  <div className="bg-surface-secondary border border-border p-2.5 rounded">
+                <div className={`grid gap-2 text-xs font-mono ${stageOutcome ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                  <div className="rounded-lg border border-border bg-surface-secondary p-3">
                     <div className="text-muted text-[10px]">INPUT ROWS</div>
-                    <div className="text-lg font-bold text-primary">{currentEvent.inputRows.length}</div>
+                    <div className="mt-1 text-xl font-bold text-primary">{currentEvent.inputRows.length}</div>
                   </div>
-                  <div className="bg-surface-secondary border border-border p-2.5 rounded">
+                  <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
                     <div className="text-muted text-[10px]">OUTPUT ROWS</div>
-                    <div className="text-lg font-bold text-success">{currentEvent.outputRows.length}</div>
+                    <div className="mt-1 text-xl font-bold text-accent">{currentEvent.outputRows.length}</div>
                   </div>
-                  <div className="bg-surface-secondary border border-border p-2.5 rounded">
-                    <div className="text-muted text-[10px]">REJECTED ROWS</div>
-                    <div className="text-lg font-bold text-error">{currentEvent.rejectedRows?.length ?? 0}</div>
-                  </div>
+                  {stageOutcome && (
+                    <div className="rounded-lg border border-border bg-surface-secondary p-3">
+                      <div className="text-muted text-[10px]">{stageOutcome.label}</div>
+                      <div className="mt-1 text-xl font-bold text-secondary">{stageOutcome.value}</div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Predicate Tree display for WHERE */}
                 {currentEvent.predicateTree && (
-                  <div className="space-y-1">
-                    <div className="text-xs font-mono text-muted uppercase">Predicate Evaluation Tree</div>
+                  <div className="space-y-2 rounded-lg border border-border bg-base/70 p-3">
+                    <div className="text-[10px] font-mono font-semibold tracking-wider text-muted uppercase">Predicate Evaluation Tree</div>
                     <PredicateTree node={currentEvent.predicateTree} />
                   </div>
                 )}
@@ -202,7 +245,7 @@ export const ExecutionVisualizer: React.FC = () => {
                 {currentEvent.subqueryResolutions && currentEvent.subqueryResolutions.length > 0 && (
                   <SubqueryVisualizer resolutions={currentEvent.subqueryResolutions} />
                 )}
-              </div>
+              </section>
             ) : (
               <div className="flex-1 flex items-center justify-center text-xs text-muted font-mono">
                 Execute a query to inspect logical stage step transformations.
