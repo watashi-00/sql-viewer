@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { DebugState, ExecutionPlan, OperationType, Schema, DataRow } from '../types';
-import { isCreateTableStatement, recordQueryExecution } from '../debugger/executionRecorder';
+import { recordQueryExecution } from '../debugger/executionRecorder';
+import { isMutatingStatement } from '../database/sqlMutation';
 import { getIntrospectedSchema, seedMoviesDataset } from '../database/schema';
 import { addHistoryItem } from '../storage/historyStore';
 
@@ -72,7 +73,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         resultColumns: plan.columns,
         debugState: 'paused',
       });
-      if (isCreateTableStatement(sql)) {
+      if (isMutatingStatement(sql)) {
         await get().loadSchema();
       }
       await addHistoryItem({

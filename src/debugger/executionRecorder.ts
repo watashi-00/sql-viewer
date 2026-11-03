@@ -1,5 +1,6 @@
 import { Parser } from 'node-sql-parser';
-import { executeQuery, persistWorkspaceCommand } from '../database/duckdb';
+import { executeQuery, persistWorkspaceCommand, persistWorkspaceMutation } from '../database/duckdb';
+import { isCreateTableStatement, isMutatingStatement } from '../database/sqlMutation';
 import { extractPipelineStages, extractPredicateTree, parseQueryAST } from '../parser/sqlParser';
 import {
   ExecutionEvent,
@@ -676,14 +677,16 @@ export function parseDuckDbExplain(explainText: string): ExplainNode | undefined
   return nodeMap.get(rootBox.id);
 }
 
-export function isCreateTableStatement(sql: string): boolean {
-  return /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\b/i.test(sql);
-}
+export { isCreateTableStatement } from '../database/sqlMutation';
 
 export async function recordQueryExecution(sql: string): Promise<ExecutionPlan> {
-  if (isCreateTableStatement(sql)) {
+  if (isMutatingStatement(sql)) {
     await executeQuery(sql);
-    await persistWorkspaceCommand(sql);
+    if (isCreateTableStatement(sql)) {
+      await persistWorkspaceCommand(sql);
+    } else {
+      await persistWorkspaceMutation(sql);
+    }
     return {
       query: sql,
       stages: [],

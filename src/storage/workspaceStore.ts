@@ -10,9 +10,15 @@ export interface PersistedWorkspaceCommand {
   tableName?: string;
 }
 
+export type PersistedWorkspaceOperation =
+  | { type: 'file'; file: PersistedWorkspaceFile; legacy?: boolean }
+  | { type: 'sql'; statements: string[]; tableName?: string; legacy?: boolean };
+
 export interface PersistedWorkspace {
   files: PersistedWorkspaceFile[];
   commands: PersistedWorkspaceCommand[];
+  /** Ordered log used by new workspaces; absent in records created by older versions. */
+  operations?: PersistedWorkspaceOperation[];
 }
 
 const DB_NAME = 'sql_viewer_workspace';
@@ -71,6 +77,44 @@ export async function saveWorkspace(workspace: PersistedWorkspace): Promise<void
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
+}
+
+export function getWorkspaceOperations(workspace: PersistedWorkspace): PersistedWorkspaceOperation[] {
+  if (workspace.operations) return structuredClone(workspace.operations);
+  return [
+    ...workspace.files.map((file): PersistedWorkspaceOperation => ({ type: 'file', file, legacy: true })),
+    ...workspace.commands.map((command): PersistedWorkspaceOperation => ({
+      type: 'sql',
+      statements: [command.sql],
+      legacy: true,
+      ...(command.tableName ? { tableName: command.tableName } : {}),
+    })),
+  ];
+}
+
+export async function appendWorkspaceOperation(operation: PersistedWorkspaceOperation): Promise<void> {
+  const workspace = await loadWorkspace();
+  workspace.operations = getWorkspaceOperations(workspace);
+  workspace.operations.push(structuredClone(operation));
+  await saveWorkspace(workspace);
+}
+
+export async function replayWorkspaceOperations(
+  operations: PersistedWorkspaceOperation[],
+  restoreFile: (file: PersistedWorkspaceFile) => Promise<void>,
+  executeSql: (sql: string) => Promise<void>,
+  shouldReplay: (operation: PersistedWorkspaceOperation) => Promise<boolean> = async () => true
+): Promise<void> {
+  for (const operation of operations) {
+    if (!(await shouldReplay(operation))) continue;
+    if (operation.type === 'file') {
+      await restoreFile(operation.file);
+      continue;
+    }
+    for (const statement of operation.statements) {
+      await executeSql(statement);
+    }
+  }
 }
 
 export async function clearWorkspace(): Promise<void> {

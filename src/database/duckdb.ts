@@ -6,8 +6,12 @@ import { Schema, TableMeta, ColumnMeta, DataRow, RowValue, CustomFileImport } fr
 import {
   loadWorkspace,
   saveWorkspace,
+  getWorkspaceOperations,
+  replayWorkspaceOperations,
   PersistedWorkspace,
+  PersistedWorkspaceOperation,
 } from '../storage/workspaceStore';
+import { getSqlMutation, SqlMutationJournal } from './sqlMutation';
 
 export type DuckDBInstance = duckdb.AsyncDuckDB | DuckDBBindings;
 export type DuckDBConnection = duckdb.AsyncDuckDBConnection | DuckDBBlockingConnection;
@@ -18,6 +22,7 @@ let initPromise: Promise<{ db: DuckDBInstance; conn: DuckDBConnection }> | null 
 let workspaceRestored = false;
 let workspaceStateLoaded = false;
 let persistedWorkspace: PersistedWorkspace = { files: [], commands: [] };
+const mutationJournal = new SqlMutationJournal();
 
 const isNodeEnvironment =
   typeof window === 'undefined' ||
@@ -108,15 +113,33 @@ export async function restoreWorkspace(): Promise<void> {
   if (isNodeEnvironment || workspaceRestored) return;
   await ensurePersistedWorkspaceLoaded();
 
-  for (const file of persistedWorkspace.files) {
-    if (!(await tableExists(file.tableName))) {
-      await registerAndLoadFile(file.fileName, file.buffer, file.format, false);
+  if (persistedWorkspace.operations) {
+    await replayWorkspaceOperations(
+      getWorkspaceOperations(persistedWorkspace),
+      async (file) => {
+        await registerAndLoadFile(file.fileName, file.buffer, file.format, false);
+      },
+      async (sql) => {
+        await executeQuery(sql);
+      },
+      async (operation) => {
+        if (!operation.legacy) return true;
+        if (operation.type === 'file') return !(await tableExists(operation.file.tableName));
+        return !operation.tableName || !(await tableExists(operation.tableName));
+      }
+    );
+  } else {
+    // Preserve the legacy restore behavior for workspaces written before ordered operations existed.
+    for (const file of persistedWorkspace.files) {
+      if (!(await tableExists(file.tableName))) {
+        await registerAndLoadFile(file.fileName, file.buffer, file.format, false);
+      }
     }
-  }
 
-  for (const command of persistedWorkspace.commands) {
-    if (!command.tableName || !(await tableExists(command.tableName))) {
-      await executeQuery(command.sql);
+    for (const command of persistedWorkspace.commands) {
+      if (!command.tableName || !(await tableExists(command.tableName))) {
+        await executeQuery(command.sql);
+      }
     }
   }
 
@@ -131,6 +154,7 @@ export async function persistWorkspaceFile(file: {
 }): Promise<void> {
   if (isNodeEnvironment) return;
   await ensurePersistedWorkspaceLoaded();
+  await appendPersistedOperation({ type: 'file', file });
   persistedWorkspace.files = [
     ...persistedWorkspace.files.filter((item) => item.tableName !== file.tableName),
     file,
@@ -144,10 +168,12 @@ export async function persistWorkspaceFile(file: {
 export async function persistWorkspaceCommand(sql: string): Promise<void> {
   if (isNodeEnvironment) return;
   await ensurePersistedWorkspaceLoaded();
-  const tableMatch = sql.match(
-    /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([a-zA-Z0-9_]+)["`]?/i
-  );
-  const tableName = tableMatch?.[1];
+  const tableName = getSqlMutation(sql)?.tableName;
+  if (mutationJournal.inTransaction) {
+    await persistMutationSql(sql);
+    return;
+  }
+  persistedWorkspace.operations = getWorkspaceOperations(persistedWorkspace);
   if (tableName) {
     persistedWorkspace.files = persistedWorkspace.files.filter((file) => file.tableName !== tableName);
   }
@@ -155,7 +181,29 @@ export async function persistWorkspaceCommand(sql: string): Promise<void> {
     ...persistedWorkspace.commands.filter((command) => command.tableName !== tableName),
     { sql, tableName },
   ];
+  await persistMutationSql(sql, tableName);
+}
+
+export async function persistWorkspaceMutation(sql: string): Promise<void> {
+  if (isNodeEnvironment) return;
+  await ensurePersistedWorkspaceLoaded();
+  await persistMutationSql(sql);
+}
+
+async function appendPersistedOperation(operation: PersistedWorkspaceOperation): Promise<void> {
+  persistedWorkspace.operations = getWorkspaceOperations(persistedWorkspace);
+  persistedWorkspace.operations.push(operation);
   await saveWorkspace(persistedWorkspace);
+}
+
+async function persistMutationSql(sql: string, tableName?: string): Promise<void> {
+  await mutationJournal.record(sql, async (operation) => {
+    await appendPersistedOperation({
+      type: 'sql',
+      statements: operation.statements,
+      ...(tableName ?? operation.tableName ? { tableName: tableName ?? operation.tableName } : {}),
+    });
+  });
 }
 
 export async function executeQuery(sql: string): Promise<{ rows: DataRow[]; columns: string[] }> {
@@ -197,6 +245,7 @@ export async function resetDatabase(): Promise<void> {
   }
   initPromise = null;
   workspaceRestored = false;
+  mutationJournal.reset();
   await getDuckDB();
 }
 
