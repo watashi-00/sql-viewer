@@ -11,15 +11,17 @@ describe('Workspace archive', () => {
         { type: 'sql' as const, statements: ['CREATE TABLE extra (id INTEGER)'], tableName: 'extra' },
         { type: 'sql' as const, statements: ['INSERT INTO people VALUES (1)'] },
       ],
+      editor: { sql: 'SELECT * FROM people;', selection: { start: 7, end: 9 } },
     };
 
     const serialized = serializeWorkspaceArchive(workspace);
-    expect(JSON.parse(serialized).version).toBe(1);
+    expect(JSON.parse(serialized).version).toBe(2);
     expect(JSON.parse(serialized).workspace.operations[0].fileIndex).toBe(0);
     const restored = parseWorkspaceArchive(serialized);
     expect(Array.from(restored.files[0].buffer)).toEqual([0, 1, 255, 42]);
     expect(restored.commands).toEqual(workspace.commands);
     expect(restored.operations?.[2]).toEqual(workspace.operations[2]);
+    expect(restored.editor).toEqual(workspace.editor);
   });
 
   it.each([

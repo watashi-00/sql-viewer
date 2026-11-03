@@ -6,7 +6,7 @@ import {
 } from './workspaceStore';
 
 const ARCHIVE_FORMAT = 'sql-viewer-workspace';
-const ARCHIVE_VERSION = 1;
+const ARCHIVE_VERSION = 2;
 
 interface EncodedFile extends Omit<PersistedWorkspaceFile, 'buffer'> {
   bufferBase64: string;
@@ -25,6 +25,7 @@ interface WorkspaceArchive {
     files: EncodedFile[];
     commands: PersistedWorkspace['commands'];
     operations: EncodedOperation[];
+    editor?: PersistedWorkspace['editor'];
   };
 }
 
@@ -132,6 +133,7 @@ export function serializeWorkspaceArchive(workspace: PersistedWorkspace): string
           ? { type: 'file', fileIndex: currentFileIndex, ...(operation.legacy ? { legacy: true } : {}) }
           : { type: 'file', file: encodeFile(operation.file), ...(operation.legacy ? { legacy: true } : {}) };
       }),
+      ...(workspace.editor ? { editor: workspace.editor } : {}),
     },
   };
   return JSON.stringify(archive, null, 2);
@@ -148,7 +150,7 @@ export function parseWorkspaceArchive(json: string): PersistedWorkspace {
   if (!isRecord(parsed) || parsed.format !== ARCHIVE_FORMAT) {
     throw new Error('This file is not a SQL Viewer workspace archive.');
   }
-  if (parsed.version !== ARCHIVE_VERSION) {
+  if (parsed.version !== 1 && parsed.version !== ARCHIVE_VERSION) {
     throw new Error(`Unsupported workspace archive version: ${String(parsed.version)}.`);
   }
   if (!isRecord(parsed.workspace)) throw new Error('Workspace archive is missing its workspace data.');
@@ -171,6 +173,22 @@ export function parseWorkspaceArchive(json: string): PersistedWorkspace {
     };
   });
   const operations = rawWorkspace.operations.map((operation) => decodeOperation(operation, files));
+  let editor: PersistedWorkspace['editor'];
+  if (rawWorkspace.editor !== undefined) {
+    if (!isRecord(rawWorkspace.editor) || typeof rawWorkspace.editor.sql !== 'string' ||
+        !isRecord(rawWorkspace.editor.selection) || typeof rawWorkspace.editor.selection.start !== 'number' ||
+        typeof rawWorkspace.editor.selection.end !== 'number') {
+      throw new Error('Workspace archive contains invalid editor state.');
+    }
+    const max = rawWorkspace.editor.sql.length;
+    editor = {
+      sql: rawWorkspace.editor.sql,
+      selection: {
+        start: Math.max(0, Math.min(max, rawWorkspace.editor.selection.start)),
+        end: Math.max(0, Math.min(max, rawWorkspace.editor.selection.end)),
+      },
+    };
+  }
 
   if (files.some((file) => !operations.some((operation) => operation.type === 'file' && sameFile(operation.file, file)))) {
     throw new Error('Workspace archive is missing a file restore operation.');
@@ -185,5 +203,6 @@ export function parseWorkspaceArchive(json: string): PersistedWorkspace {
     files,
     commands,
     operations,
+    ...(editor ? { editor } : {}),
   };
 }

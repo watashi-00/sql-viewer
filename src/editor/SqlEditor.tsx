@@ -3,8 +3,10 @@ import Editor from '@monaco-editor/react';
 import { useWorkspaceStore } from '../state/useWorkspaceStore';
 import { getCompletionsForPosition } from './intellisense';
 import { AppTheme } from '../theme';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, WandSparkles } from 'lucide-react';
 import { createMonacoMarkers } from './monacoDiagnostics';
+import { formatSql } from './formatSql';
+import { loadWorkspace, saveEditorState } from '../storage/workspaceStore';
 
 const DIAGNOSTIC_MARKER_OWNER = 'sql-viewer-diagnostics';
 
@@ -97,6 +99,8 @@ export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
   const { sql, setSql, runQuery, queryError, lastExecutionMode } = useWorkspaceStore();
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorTouched = useRef(false);
   const monacoTheme =
     theme === 'light'
       ? SQL_LIGHT_THEME_NAME
@@ -108,7 +112,31 @@ export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
 
   const handleEditorChange = (value?: string) => {
     if (value !== undefined) {
+      editorTouched.current = true;
       setSql(value);
+      scheduleEditorSave(value);
+    }
+  };
+
+  const scheduleEditorSave = (value: string) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      const editor = editorRef.current;
+      const model = editor?.getModel?.();
+      const selection = editor?.getSelection?.();
+      const start = model && selection ? model.getOffsetAt(selection.getStartPosition()) : 0;
+      const end = model && selection ? model.getOffsetAt(selection.getEndPosition()) : start;
+      void saveEditorState({ sql: value, selection: { start, end } });
+    }, 300);
+  };
+
+  const handleFormat = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const formatted = formatSql(editor.getValue());
+    if (formatted !== editor.getValue()) {
+      editor.setValue(formatted);
+      setSql(formatted);
     }
   };
 
@@ -123,9 +151,14 @@ export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
     <div className="h-full w-full flex flex-col bg-surface border-b border-border">
       <div className="flex items-center justify-between px-3 py-1.5 bg-surface-secondary border-b border-border text-xs text-secondary font-mono">
         <span>SQL EDITOR</span>
-        <span className={lastExecutionMode === 'selection' ? 'text-accent' : 'text-muted'}>
-          {lastExecutionMode === 'selection' ? 'Selected SQL executed' : 'Ctrl+Enter runs selection · F5 runs query'}
-        </span>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={handleFormat} title="Format SQL" className="flex items-center gap-1 text-secondary hover:text-primary">
+            <WandSparkles size={12} /> Format SQL
+          </button>
+          <span className={lastExecutionMode === 'selection' ? 'text-accent' : 'text-muted'}>
+            {lastExecutionMode === 'selection' ? 'Selected SQL executed' : 'Ctrl+Enter runs selection · F5 runs query'}
+          </span>
+        </div>
       </div>
       {queryError && (
         <div role="alert" className="max-h-32 shrink-0 overflow-y-auto border-b border-error/30 bg-error/5 px-3 py-2 text-xs">
@@ -181,6 +214,27 @@ export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
             if (editor.getModel?.() && monaco?.editor?.setModelMarkers) {
               monaco.editor.setModelMarkers(editor.getModel(), DIAGNOSTIC_MARKER_OWNER, createMonacoMarkers(queryError));
             }
+
+            const selectionListener = editor.onDidChangeCursorSelection?.(() => {
+              if (editorTouched.current) scheduleEditorSave(useWorkspaceStore.getState().sql);
+            });
+            void loadWorkspace().then((workspace) => {
+              if (!workspace.editor || editorTouched.current) return;
+              const model = editor.getModel?.();
+              if (!model) return;
+              editor.setValue(workspace.editor.sql);
+              setSql(workspace.editor.sql);
+              const start = model.getPositionAt(workspace.editor.selection.start);
+              const end = model.getPositionAt(workspace.editor.selection.end);
+              editor.setSelection({
+                startLineNumber: start.lineNumber,
+                startColumn: start.column,
+                endLineNumber: end.lineNumber,
+                endColumn: end.column,
+              });
+              editorTouched.current = true;
+            }).catch(() => undefined);
+            editor.onDidDispose?.(() => selectionListener?.dispose?.());
 
             if (monaco?.KeyMod?.CtrlCmd !== undefined && monaco?.KeyCode?.Enter !== undefined) {
               editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {

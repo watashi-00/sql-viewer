@@ -10,6 +10,11 @@ export interface PersistedWorkspaceCommand {
   tableName?: string;
 }
 
+export interface PersistedEditorState {
+  sql: string;
+  selection: { start: number; end: number };
+}
+
 export type PersistedWorkspaceOperation =
   | { type: 'file'; file: PersistedWorkspaceFile; legacy?: boolean }
   | { type: 'sql'; statements: string[]; tableName?: string; legacy?: boolean };
@@ -19,6 +24,7 @@ export interface PersistedWorkspace {
   commands: PersistedWorkspaceCommand[];
   /** Ordered log used by new workspaces; absent in records created by older versions. */
   operations?: PersistedWorkspaceOperation[];
+  editor?: PersistedEditorState;
 }
 
 const DB_NAME = 'sql_viewer_workspace';
@@ -94,7 +100,12 @@ function validateStoredWorkspace(value: unknown): PersistedWorkspace {
   if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Saved workspace data is corrupted.');
   const candidate = value as Record<string, unknown>;
   if (!Array.isArray(candidate.files) || !Array.isArray(candidate.commands) ||
-      (candidate.operations !== undefined && !Array.isArray(candidate.operations))) {
+      (candidate.operations !== undefined && !Array.isArray(candidate.operations)) ||
+      (candidate.editor !== undefined && (!candidate.editor || typeof candidate.editor !== 'object' ||
+        typeof (candidate.editor as Record<string, unknown>).sql !== 'string' ||
+        !(candidate.editor as Record<string, unknown>).selection ||
+        typeof ((candidate.editor as Record<string, unknown>).selection as Record<string, unknown>).start !== 'number' ||
+        typeof ((candidate.editor as Record<string, unknown>).selection as Record<string, unknown>).end !== 'number'))) {
     throw new Error('Saved workspace data is corrupted. Clear it or import a valid backup.');
   }
   if (!candidate.files.every(isPersistedFile)) {
@@ -110,6 +121,12 @@ function validateStoredWorkspace(value: unknown): PersistedWorkspace {
     throw new Error('Saved workspace contains a corrupted operation log. Clear it or import a valid backup.');
   }
   return value as PersistedWorkspace;
+}
+
+export async function saveEditorState(editor: PersistedEditorState): Promise<void> {
+  const workspace = await loadWorkspace();
+  workspace.editor = structuredClone(editor);
+  await saveWorkspace(workspace);
 }
 
 export async function saveWorkspace(workspace: PersistedWorkspace): Promise<void> {

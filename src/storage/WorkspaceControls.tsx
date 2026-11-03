@@ -82,6 +82,7 @@ export const WorkspaceControls: React.FC = () => {
       try {
         await saveWorkspace(importedWorkspace);
         await restartDatabase();
+        if (importedWorkspace.editor) setSql(importedWorkspace.editor.sql);
       } catch (restoreError) {
         try {
           await saveWorkspace(previousWorkspace);
