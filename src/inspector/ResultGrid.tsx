@@ -9,12 +9,16 @@ export interface ResultGridProps {
   rows?: DataRow[];
   columns?: string[];
   onClose?: () => void;
+  selectedRowValue?: DataRow | null;
+  onSelectRow?: (row: DataRow | null) => void;
+  disableParquet?: boolean;
 }
 
-export const ResultGrid: React.FC<ResultGridProps> = ({ rows: propsRows, columns: propsColumns, onClose }) => {
-  const { resultRows, resultColumns, selectedRow, setSelectedRow } = useWorkspaceStore();
+export const ResultGrid: React.FC<ResultGridProps> = ({ rows: propsRows, columns: propsColumns, onClose, selectedRowValue, onSelectRow, disableParquet }) => {
+  const { resultRows, resultColumns, selectedRow: workspaceSelectedRow, setSelectedRow } = useWorkspaceStore();
   const rows = propsRows ?? resultRows;
   const columns = propsColumns ?? resultColumns;
+  const selectedRow = onSelectRow ? selectedRowValue ?? null : workspaceSelectedRow;
 
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -126,14 +130,14 @@ export const ResultGrid: React.FC<ResultGridProps> = ({ rows: propsRows, columns
               <Download size={11} />
               <span>Export JSON</span>
             </button>
-            <button
+            {!disableParquet && <button
               onClick={() => handleExport('parquet')}
               disabled={rows.length === 0}
               className="flex items-center gap-1 px-2 py-0.5 rounded bg-surface hover:bg-surface-secondary text-primary text-[11px] border border-border disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <Download size={11} />
               <span>Export Parquet</span>
-            </button>
+            </button>}
             {onClose && (
               <button
                 type="button"
@@ -172,7 +176,7 @@ export const ResultGrid: React.FC<ResultGridProps> = ({ rows: propsRows, columns
                   return (
                     <tr
                       key={index}
-                      onClick={() => setSelectedRow(row)}
+                      onClick={() => onSelectRow ? onSelectRow(row) : setSelectedRow(row)}
                       className={`hover:bg-surface-secondary/70 cursor-pointer transition-colors ${
                         isSelected ? 'bg-accent/15 font-medium' : ''
                       }`}

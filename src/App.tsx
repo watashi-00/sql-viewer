@@ -10,6 +10,7 @@ import { applyTheme, getInitialTheme, AppTheme } from './theme';
 import { createShareableUrl, readShareableState } from './sharing/shareableQuery';
 import { WorkspaceControls } from './storage/WorkspaceControls';
 import { ResizeHandle } from './components/ResizeHandle';
+import { ChallengesPage } from './challenges/ChallengesPage';
 
 interface PanelLayout {
   databaseOpen: boolean;
@@ -78,6 +79,9 @@ const PanelToggle: React.FC<PanelToggleProps> = ({ label, open, onClick }) => (
 );
 
 export const App: React.FC = () => {
+  const [activeView, setActiveView] = useState<'workspace' | 'challenges'>(() =>
+    new URLSearchParams(window.location.search).get('view') === 'challenges' ? 'challenges' : 'workspace'
+  );
   const [activeTab, setActiveTab] = useState<'editor' | 'builder'>('editor');
   const [theme, setTheme] = useState<AppTheme>(getInitialTheme);
   const [shareCopied, setShareCopied] = useState(false);
@@ -138,6 +142,7 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
+    if (activeView !== 'workspace') return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F5') {
         e.preventDefault();
@@ -146,7 +151,7 @@ export const App: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [runQuery]);
+  }, [activeView, runQuery]);
 
   const togglePanel = (panel: 'databaseOpen' | 'editorOpen' | 'debuggerOpen' | 'resultsOpen') => {
     setPanelLayout((layout) => ({ ...layout, [panel]: !layout[panel] }));
@@ -186,6 +191,10 @@ export const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <nav aria-label="Main navigation" className="mr-2 flex items-center gap-1 rounded border border-border bg-base p-0.5">
+            <button type="button" aria-current={activeView === 'workspace' ? 'page' : undefined} onClick={() => { setActiveView('workspace'); window.history.replaceState(null, '', window.location.pathname); }} className={`rounded px-2.5 py-1 ${activeView === 'workspace' ? 'bg-accent/20 text-accent' : 'text-muted hover:text-primary'}`}>Workspace</button>
+            <button type="button" aria-current={activeView === 'challenges' ? 'page' : undefined} onClick={() => { setActiveView('challenges'); window.history.replaceState(null, '', `${window.location.pathname}?view=challenges`); }} className={`rounded px-2.5 py-1 ${activeView === 'challenges' ? 'bg-accent/20 text-accent' : 'text-muted hover:text-primary'}`}>Challenges</button>
+          </nav>
           <label className="flex items-center gap-1.5 text-secondary" title="Color theme">
             <Palette size={13} />
             <select
@@ -200,7 +209,7 @@ export const App: React.FC = () => {
               <option value="ocean">Ocean</option>
             </select>
           </label>
-          <button
+          {activeView === 'workspace' && <><button
             type="button"
             onClick={() => void shareQuery()}
             title="Copy a link with this SQL query and debugger stage"
@@ -226,9 +235,11 @@ export const App: React.FC = () => {
             <Play size={12} fill="currentColor" />
             <span>Run Query (F5)</span>
           </button>
+          </>}
         </div>
       </header>
 
+      {activeView === 'challenges' ? <ChallengesPage theme={theme} /> : <>
       <div role="toolbar" aria-label="Workspace panels" className="flex min-h-9 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-secondary px-3 py-1.5 text-xs">
         <span className="font-mono text-[10px] font-semibold tracking-wider text-muted">PANELS</span>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -373,6 +384,7 @@ export const App: React.FC = () => {
           )}
         </div>
       </main>
+      </>}
     </div>
   );
 };

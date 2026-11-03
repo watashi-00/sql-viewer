@@ -7,6 +7,7 @@ import { AlertTriangle, WandSparkles } from 'lucide-react';
 import { createMonacoMarkers } from './monacoDiagnostics';
 import { formatSql } from './formatSql';
 import { loadWorkspace, saveEditorState } from '../storage/workspaceStore';
+import { SqlDiagnostic } from './sqlDiagnostics';
 
 const DIAGNOSTIC_MARKER_OWNER = 'sql-viewer-diagnostics';
 
@@ -105,10 +106,21 @@ export const defineSqlOceanTheme = (monaco: any) => {
 
 export interface SqlEditorProps {
   theme?: AppTheme;
+  value?: string;
+  onChange?: (value: string) => void;
+  onRun?: (sql?: string, sourceStart?: { line: number; column: number }) => void | Promise<void>;
+  diagnostic?: SqlDiagnostic | null;
 }
 
-export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
-  const { sql, setSql, runQuery, queryError, lastExecutionMode } = useWorkspaceStore();
+export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight', value, onChange, onRun, diagnostic }) => {
+  const workspace = useWorkspaceStore();
+  const controlled = value !== undefined;
+  const sql = controlled ? value : workspace.sql;
+  const queryError = controlled ? diagnostic ?? null : workspace.queryError;
+  const lastExecutionMode = controlled ? null : workspace.lastExecutionMode;
+  const setSql = (next: string) => controlled ? onChange?.(next) : workspace.setSql(next);
+  const runQuery = (query?: string, sourceStart?: { line: number; column: number }) =>
+    controlled ? onRun?.(query, sourceStart) : workspace.runQuery(query, sourceStart);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -126,7 +138,7 @@ export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
     if (value !== undefined) {
       editorTouched.current = true;
       setSql(value);
-      scheduleEditorSave(value);
+      if (!controlled) scheduleEditorSave(value);
     }
   };
 
@@ -149,6 +161,7 @@ export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
     if (formatted !== editor.getValue()) {
       editor.setValue(formatted);
       setSql(formatted);
+      if (!controlled) scheduleEditorSave(formatted);
     }
   };
 
@@ -228,16 +241,16 @@ export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
             }
 
             const selectionListener = editor.onDidChangeCursorSelection?.(() => {
-              if (editorTouched.current) scheduleEditorSave(useWorkspaceStore.getState().sql);
+              if (!controlled && editorTouched.current) scheduleEditorSave(useWorkspaceStore.getState().sql);
             });
-            void loadWorkspace().then((workspace) => {
-              if (!workspace.editor || editorTouched.current) return;
+            if (!controlled) void loadWorkspace().then((savedWorkspace) => {
+              if (!savedWorkspace.editor || editorTouched.current) return;
               const model = editor.getModel?.();
               if (!model) return;
-              editor.setValue(workspace.editor.sql);
-              setSql(workspace.editor.sql);
-              const start = model.getPositionAt(workspace.editor.selection.start);
-              const end = model.getPositionAt(workspace.editor.selection.end);
+              editor.setValue(savedWorkspace.editor.sql);
+              setSql(savedWorkspace.editor.sql);
+              const start = model.getPositionAt(savedWorkspace.editor.selection.start);
+              const end = model.getPositionAt(savedWorkspace.editor.selection.end);
               editor.setSelection({
                 startLineNumber: start.lineNumber,
                 startColumn: start.column,

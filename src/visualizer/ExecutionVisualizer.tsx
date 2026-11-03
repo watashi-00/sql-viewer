@@ -8,28 +8,40 @@ import { CteVisualizer } from './CteVisualizer';
 import { SubqueryVisualizer } from './SubqueryVisualizer';
 import { ExplainTreeVisualizer } from './ExplainTreeVisualizer';
 import { Play, SkipBack, SkipForward, RotateCcw, CheckCircle2, ArrowRight } from 'lucide-react';
+import { DebugState, ExecutionPlan, OperationType } from '../types';
 
 export interface ExecutionVisualizerProps {
   onClose?: () => void;
+  controller?: {
+    executionPlan: ExecutionPlan | null;
+    stages: OperationType[];
+    currentStageIndex: number;
+    debugState: DebugState;
+    stepForward: () => void;
+    stepBack: () => void;
+    restartDebug: () => void;
+    runQuery: () => void | Promise<void>;
+    jumpToStage: (index: number) => void;
+  };
 }
 
 export const ExecutionVisualizer: React.FC<ExecutionVisualizerProps> = ({
   onClose,
+  controller,
 }) => {
   const [viewMode, setViewMode] = useState<'relational' | 'explain'>('relational');
   const [activeCteScopeId, setActiveCteScopeId] = useState<string>('main');
 
-  const {
-    executionPlan,
-    stages,
-    currentStageIndex,
-    stepForward,
-    stepBack,
-    restartDebug,
-    runQuery,
-    jumpToStage,
-    debugState,
-  } = useWorkspaceStore();
+  const workspace = useWorkspaceStore();
+  const executionPlan = controller ? controller.executionPlan : workspace.executionPlan;
+  const stages = controller ? controller.stages : workspace.stages;
+  const currentStageIndex = controller ? controller.currentStageIndex : workspace.currentStageIndex;
+  const stepForward = controller ? controller.stepForward : workspace.stepForward;
+  const stepBack = controller ? controller.stepBack : workspace.stepBack;
+  const restartDebug = controller ? controller.restartDebug : workspace.restartDebug;
+  const runQuery = controller ? controller.runQuery : workspace.runQuery;
+  const jumpToStage = controller ? controller.jumpToStage : workspace.jumpToStage;
+  const debugState = controller ? controller.debugState : workspace.debugState;
 
   const currentEvent = executionPlan?.events[currentStageIndex];
   const stageOutcome = currentEvent?.rejectedRows !== undefined
