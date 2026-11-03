@@ -187,7 +187,7 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-2 font-mono font-bold tracking-wide">
           <Layers size={16} className="text-accent" />
           <h1 className="text-xs">SQL LAB</h1>
-          <span className="text-muted text-[10px] font-normal">| SQL Query Debugger · DuckDB (Local)</span>
+          <span className="text-muted text-[10px] font-normal">| DuckDB Engine (Local)</span>
         </div>
 
         <div className="flex items-center gap-2">
