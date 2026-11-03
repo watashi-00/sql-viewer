@@ -9,7 +9,19 @@ import { SubqueryVisualizer } from './SubqueryVisualizer';
 import { ExplainTreeVisualizer } from './ExplainTreeVisualizer';
 import { Play, SkipBack, SkipForward, RotateCcw, CheckCircle2, ArrowRight } from 'lucide-react';
 
-export const ExecutionVisualizer: React.FC = () => {
+export type DebuggerDockPosition = 'right' | 'bottom';
+
+export interface ExecutionVisualizerProps {
+  dockPosition?: DebuggerDockPosition;
+  onDockPositionChange?: (position: DebuggerDockPosition) => void;
+  onClose?: () => void;
+}
+
+export const ExecutionVisualizer: React.FC<ExecutionVisualizerProps> = ({
+  dockPosition = 'right',
+  onDockPositionChange,
+  onClose,
+}) => {
   const [viewMode, setViewMode] = useState<'relational' | 'explain'>('relational');
   const [activeCteScopeId, setActiveCteScopeId] = useState<string>('main');
 
@@ -37,7 +49,7 @@ export const ExecutionVisualizer: React.FC = () => {
   return (
     <div className="h-full w-full flex flex-col bg-base text-primary font-sans select-none border-b border-border">
       {/* Visualizer Toolbar */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-surface border-b border-border text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 bg-surface border-b border-border text-xs">
         <div className="flex items-center gap-2 font-mono">
           <span className="text-secondary font-semibold">SQL DEBUGGER</span>
           <span className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border text-accent text-[10px] uppercase">
@@ -74,6 +86,28 @@ export const ExecutionVisualizer: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1">
+          {onDockPositionChange && (
+            <div role="group" aria-label="SQL debugger position" className="mr-1 flex items-center rounded border border-border bg-surface-secondary p-0.5">
+              <button
+                type="button"
+                aria-pressed={dockPosition === 'right'}
+                onClick={() => onDockPositionChange('right')}
+                title="Dock SQL Debugger to the right"
+                className={`rounded px-1.5 py-1 text-[10px] transition-colors ${dockPosition === 'right' ? 'bg-accent/20 text-accent' : 'text-muted hover:text-primary'}`}
+              >
+                Right
+              </button>
+              <button
+                type="button"
+                aria-pressed={dockPosition === 'bottom'}
+                onClick={() => onDockPositionChange('bottom')}
+                title="Dock SQL Debugger below the editor"
+                className={`rounded px-1.5 py-1 text-[10px] transition-colors ${dockPosition === 'bottom' ? 'bg-accent/20 text-accent' : 'text-muted hover:text-primary'}`}
+              >
+                Bottom
+              </button>
+            </div>
+          )}
           <button
             onClick={restartDebug}
             disabled={!executionPlan}
@@ -106,6 +140,17 @@ export const ExecutionVisualizer: React.FC = () => {
             <Play size={12} fill="currentColor" />
             <span>Run</span>
           </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close SQL Debugger"
+              title="Close SQL Debugger"
+              className="rounded px-1.5 py-1 text-muted hover:bg-surface-secondary hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            >
+              ×
+            </button>
+          )}
         </div>
       </div>
 

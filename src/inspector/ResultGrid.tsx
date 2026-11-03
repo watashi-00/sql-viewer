@@ -8,9 +8,10 @@ import { DataRow } from '../types';
 export interface ResultGridProps {
   rows?: DataRow[];
   columns?: string[];
+  onClose?: () => void;
 }
 
-export const ResultGrid: React.FC<ResultGridProps> = ({ rows: propsRows, columns: propsColumns }) => {
+export const ResultGrid: React.FC<ResultGridProps> = ({ rows: propsRows, columns: propsColumns, onClose }) => {
   const { resultRows, resultColumns, selectedRow, setSelectedRow } = useWorkspaceStore();
   const rows = propsRows ?? resultRows;
   const columns = propsColumns ?? resultColumns;
@@ -133,6 +134,17 @@ export const ResultGrid: React.FC<ResultGridProps> = ({ rows: propsRows, columns
               <Download size={11} />
               <span>Export Parquet</span>
             </button>
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close Result Set"
+                title="Close Result Set"
+                className="rounded px-1.5 py-0.5 text-muted hover:bg-surface hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+              >
+                ×
+              </button>
+            )}
           </div>
         </div>
 
