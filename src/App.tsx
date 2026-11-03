@@ -69,8 +69,8 @@ export const App: React.FC = () => {
       <header className="h-10 px-3 bg-surface border-b border-border flex items-center justify-between text-xs">
         <div className="flex items-center gap-2 font-mono font-bold tracking-wide">
           <Layers size={16} className="text-accent" />
-          <span>SQL LAB</span>
-          <span className="text-muted text-[10px] font-normal">| DuckDB Engine (Local)</span>
+          <h1 className="text-xs">SQL LAB</h1>
+          <span className="text-muted text-[10px] font-normal">| SQL Query Debugger · DuckDB (Local)</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -115,7 +115,7 @@ export const App: React.FC = () => {
       </header>
 
       {/* Main Multi-Panel Workspace */}
-      <div className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex overflow-hidden" aria-label="SQL workspace">
         {/* Left Sidebar */}
         <div className="w-64 h-full">
           <DatabaseExplorer />
@@ -171,7 +171,7 @@ export const App: React.FC = () => {
             <ResultGrid />
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 };

@@ -163,6 +163,8 @@ Pull requests and pushes to `master` also run the validation workflow in `.githu
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development and pull request guidelines.
 
+Search metadata, canonical URL, sitemap maintenance, and current single-page-app SEO limits are documented in [docs/seo.md](docs/seo.md).
+
 ---
 
 ## License
