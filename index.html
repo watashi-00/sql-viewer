@@ -3,10 +3,63 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SQL IDE & Debugger</title>
+    <meta name="theme-color" content="#0b0d10" />
+    <meta name="application-name" content="SQL Lab" />
+    <meta
+      name="description"
+      content="Use a free SQL visualizer and query debugger to step through SQL in your browser. Inspect joins, filters, GROUP BY, NULL logic, and DuckDB query plans."
+    />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <link rel="canonical" href="https://web-tollings.github.io/sql-viewer/" />
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SQL Lab" />
+    <meta property="og:title" content="Free SQL Visualizer &amp; Query Debugger | SQL Lab" />
+    <meta
+      property="og:description"
+      content="Use a free SQL visualizer and query debugger to step through SQL in your browser. Inspect joins, filters, aggregations, NULL logic, and DuckDB plans."
+    />
+    <meta property="og:url" content="https://web-tollings.github.io/sql-viewer/" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content="https://web-tollings.github.io/sql-viewer/social-preview.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="SQL Lab visualizes SQL queries through stages such as FROM, JOIN, WHERE, and GROUP BY." />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Free SQL Visualizer &amp; Query Debugger | SQL Lab" />
+    <meta
+      name="twitter:description"
+      content="Use a free SQL visualizer and query debugger to inspect joins, filters, aggregations, NULL logic, and DuckDB query plans."
+    />
+    <meta name="twitter:image" content="https://web-tollings.github.io/sql-viewer/social-preview.png" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "SQL Lab",
+        "alternateName": "SQL Query Debugger and Visualizer",
+        "url": "https://web-tollings.github.io/sql-viewer/",
+        "inLanguage": "en"
+      }
+    </script>
+    <title>Free SQL Visualizer &amp; Query Debugger | SQL Lab</title>
   </head>
   <body class="bg-base text-primary antialiased">
     <div id="root"></div>
+    <noscript>
+      <main>
+        <h1>SQL Lab: SQL Query Debugger and Visualizer</h1>
+        <p>
+          Explore SQL execution one step at a time. SQL Lab runs DuckDB in your browser and helps you
+          inspect joins, filters, GROUP BY, NULL logic, and physical query plans. JavaScript is required
+          to use the interactive SQL editor.
+        </p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

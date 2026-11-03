@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10151e" />
+      <stop offset="1" stop-color="#090b0f" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9bb4ff" />
+      <stop offset="1" stop-color="#6d8fff" />
+    </linearGradient>
+    <clipPath id="editor-clip">
+      <rect x="64" y="292" width="500" height="250" rx="14" />
+    </clipPath>
+  </defs>
+  <rect width="1200" height="630" fill="url(#background)" />
+  <circle cx="1080" cy="70" r="250" fill="#23365f" opacity="0.2" />
+  <rect x="64" y="54" width="44" height="44" rx="12" fill="#19243a" stroke="#3c558b" />
+  <path d="M80.5 67.75 73.6 76l6.9 8.25M91.5 67.75 98.4 76l-6.9 8.25M88.1 66.4l-4.2 19.2" fill="none" stroke="url(#accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+  <text x="122" y="84" fill="#e8edf7" font-family="DejaVu Sans, sans-serif" font-size="22" font-weight="700" letter-spacing="2">SQL LAB</text>
+  <text x="64" y="190" fill="#f4f6fb" font-family="DejaVu Sans, sans-serif" font-size="54" font-weight="700">Make SQL execution visible.</text>
+  <text x="68" y="237" fill="#a9b4c8" font-family="DejaVu Sans, sans-serif" font-size="24">Step through joins, filters, groups, and query plans.</text>
+
+  <g clip-path="url(#editor-clip)">
+    <rect x="64" y="292" width="500" height="250" fill="#0b0e13" />
+    <rect x="64" y="292" width="500" height="42" fill="#151a23" />
+    <path d="M64 334h500" stroke="#293243" />
+    <circle cx="88" cy="313" r="5" fill="#7c9cff" />
+    <circle cx="106" cy="313" r="5" fill="#46536a" />
+    <circle cx="124" cy="313" r="5" fill="#46536a" />
+    <text x="92" y="365" fill="#8ab4f8" font-family="DejaVu Sans Mono, monospace" font-size="18">SELECT</text>
+    <text x="178" y="365" fill="#e5eaf4" font-family="DejaVu Sans Mono, monospace" font-size="18">m.title, AVG(r.score)</text>
+    <text x="92" y="399" fill="#8ab4f8" font-family="DejaVu Sans Mono, monospace" font-size="18">FROM</text>
+    <text x="151" y="399" fill="#e5eaf4" font-family="DejaVu Sans Mono, monospace" font-size="18">movies m</text>
+    <text x="92" y="433" fill="#8ab4f8" font-family="DejaVu Sans Mono, monospace" font-size="18">JOIN</text>
+    <text x="151" y="433" fill="#e5eaf4" font-family="DejaVu Sans Mono, monospace" font-size="18">reviews r USING (movie_id)</text>
+    <text x="92" y="467" fill="#8ab4f8" font-family="DejaVu Sans Mono, monospace" font-size="18">GROUP BY</text>
+    <text x="189" y="467" fill="#e5eaf4" font-family="DejaVu Sans Mono, monospace" font-size="18">m.title</text>
+    <text x="92" y="514" fill="#748098" font-family="DejaVu Sans, sans-serif" font-size="14">DuckDB runs locally in your browser</text>
+  </g>
+  <rect x="64" y="292" width="500" height="250" rx="14" fill="none" stroke="#293243" />
+
+  <path d="M600 416h36m0 0-10-9m10 9-10 9" fill="none" stroke="#5d6a83" stroke-width="2" />
+  <g font-family="DejaVu Sans, sans-serif">
+    <rect x="662" y="292" width="208" height="70" rx="12" fill="#111823" stroke="#516fae" />
+    <text x="684" y="321" fill="#93aff2" font-size="13" font-weight="700">STAGE 1</text>
+    <text x="684" y="346" fill="#eef2fa" font-size="20" font-weight="700">FROM</text>
+    <rect x="896" y="292" width="240" height="70" rx="12" fill="#111823" stroke="#516fae" />
+    <text x="918" y="321" fill="#93aff2" font-size="13" font-weight="700">STAGE 2</text>
+    <text x="918" y="346" fill="#eef2fa" font-size="20" font-weight="700">JOIN</text>
+    <rect x="662" y="390" width="208" height="70" rx="12" fill="#111823" stroke="#516fae" />
+    <text x="684" y="419" fill="#93aff2" font-size="13" font-weight="700">STAGE 3</text>
+    <text x="684" y="444" fill="#eef2fa" font-size="20" font-weight="700">WHERE</text>
+    <rect x="896" y="390" width="240" height="70" rx="12" fill="#111823" stroke="#516fae" />
+    <text x="918" y="419" fill="#93aff2" font-size="13" font-weight="700">STAGE 4</text>
+    <text x="918" y="444" fill="#eef2fa" font-size="20" font-weight="700">GROUP BY</text>
+  </g>
+  <path d="M766 363v17m0 0h250m0-18v18m-250 0v10m250-10v10" fill="none" stroke="#45516a" stroke-width="2" />
+
+  <text x="662" y="510" fill="#a9b4c8" font-family="DejaVu Sans, sans-serif" font-size="18">Free SQL IDE · DuckDB WASM · Open source</text>
+</svg>
