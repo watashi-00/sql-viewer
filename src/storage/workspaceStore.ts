@@ -1,18 +1,32 @@
+import type { VisualQueryState } from '../types';
+
 export interface PersistedWorkspaceFile {
   fileName: string;
   tableName: string;
   format: 'csv' | 'json' | 'parquet';
   buffer: Uint8Array;
 }
-
 export interface PersistedWorkspaceCommand {
   sql: string;
   tableName?: string;
 }
 
+export interface PersistedEditorState {
+  sql: string;
+  selection: { start: number; end: number };
+}
+
+export type PersistedWorkspaceOperation =
+  | { type: 'file'; file: PersistedWorkspaceFile; legacy?: boolean }
+  | { type: 'sql'; statements: string[]; tableName?: string; legacy?: boolean };
+
 export interface PersistedWorkspace {
   files: PersistedWorkspaceFile[];
   commands: PersistedWorkspaceCommand[];
+  /** Ordered log used by new workspaces; absent in records created by older versions. */
+  operations?: PersistedWorkspaceOperation[];
+  editor?: PersistedEditorState;
+  builder?: VisualQueryState;
 }
 
 const DB_NAME = 'sql_viewer_workspace';
@@ -24,6 +38,62 @@ let memoryWorkspace: PersistedWorkspace | null = null;
 
 function emptyWorkspace(): PersistedWorkspace {
   return { files: [], commands: [] };
+}
+
+function isPersistedFile(value: unknown): value is PersistedWorkspaceFile {
+  if (!value || typeof value !== 'object') return false;
+  const file = value as Record<string, unknown>;
+  return typeof file.fileName === 'string' && typeof file.tableName === 'string' &&
+    ['csv', 'json', 'parquet'].includes(String(file.format)) && file.buffer instanceof Uint8Array;
+}
+
+function isPersistedOperation(value: unknown): value is PersistedWorkspaceOperation {
+  if (!value || typeof value !== 'object') return false;
+  const operation = value as Record<string, unknown>;
+  if (operation.legacy !== undefined && typeof operation.legacy !== 'boolean') return false;
+  if (operation.type === 'file') return isPersistedFile(operation.file);
+  return operation.type === 'sql' && Array.isArray(operation.statements) && operation.statements.length > 0 &&
+    operation.statements.every((statement) => typeof statement === 'string' && statement.trim().length > 0) &&
+    (operation.tableName === undefined || typeof operation.tableName === 'string');
+}
+
+export function isBuilderState(value: unknown): value is VisualQueryState {
+  if (!value || typeof value !== 'object') return false;
+  const state = value as Record<string, unknown>;
+  if (!Array.isArray(state.nodes) || !Array.isArray(state.joins) || !Array.isArray(state.filters)) return false;
+  if (!state.nodes.every((node) => {
+    if (!node || typeof node !== 'object') return false;
+    const item = node as Record<string, unknown>;
+    return typeof item.id === 'string' && typeof item.tableName === 'string' &&
+      (item.alias === undefined || typeof item.alias === 'string') && Array.isArray(item.selectedColumns) &&
+      item.selectedColumns.every((column) => typeof column === 'string') &&
+      (item.groupByColumns === undefined || (Array.isArray(item.groupByColumns) && item.groupByColumns.every((column) => typeof column === 'string'))) &&
+      (!item.position || (typeof item.position === 'object' && typeof (item.position as Record<string, unknown>).x === 'number' && typeof (item.position as Record<string, unknown>).y === 'number')) &&
+      (item.columnAliases === undefined || (typeof item.columnAliases === 'object' && item.columnAliases !== null &&
+        Object.values(item.columnAliases as Record<string, unknown>).every((alias) => typeof alias === 'string')));
+  })) return false;
+  if (!state.joins.every((join) => {
+    if (!join || typeof join !== 'object') return false;
+    const item = join as Record<string, unknown>;
+    return typeof item.id === 'string' && typeof item.leftTable === 'string' && typeof item.leftColumn === 'string' &&
+      typeof item.rightTable === 'string' && typeof item.rightColumn === 'string' &&
+      ['INNER', 'LEFT', 'RIGHT', 'FULL'].includes(String(item.joinType)) &&
+      (item.operator === undefined || ['=', '!=', '>', '>=', '<', '<='].includes(String(item.operator)));
+  })) return false;
+  if (!state.filters.every((filter) => {
+    if (!filter || typeof filter !== 'object') return false;
+    const item = filter as Record<string, unknown>;
+    return typeof item.id === 'string' && typeof item.table === 'string' && typeof item.column === 'string' &&
+      typeof item.value === 'string' && ['=', '!=', '>', '>=', '<', '<=', 'LIKE', 'IN'].includes(String(item.operator));
+  })) return false;
+  if (state.aggregates !== undefined && (!Array.isArray(state.aggregates) || !state.aggregates.every((aggregate) => {
+    if (!aggregate || typeof aggregate !== 'object') return false;
+    const item = aggregate as Record<string, unknown>;
+    return typeof item.id === 'string' && typeof item.table === 'string' && typeof item.column === 'string' &&
+      (item.alias === undefined || typeof item.alias === 'string') && ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'].includes(String(item.fn));
+  }))) return false;
+  if (state.limit !== undefined && (typeof state.limit !== 'number' || !Number.isFinite(state.limit))) return false;
+  return true;
 }
 
 function openDB(): Promise<IDBDatabase | null> {
@@ -53,11 +123,66 @@ export async function loadWorkspace(): Promise<PersistedWorkspace> {
   const db = await openDB();
   if (!db) return memoryWorkspace ? structuredClone(memoryWorkspace) : emptyWorkspace();
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(WORKSPACE_KEY);
-    request.onsuccess = () => resolve(request.result ? request.result as PersistedWorkspace : emptyWorkspace());
-    request.onerror = () => resolve(emptyWorkspace());
+    request.onsuccess = () => {
+      try {
+        resolve(validateStoredWorkspace(request.result));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    request.onerror = () => reject(new Error('Could not read the saved workspace. It may be corrupted.'));
   });
+}
+
+function validateStoredWorkspace(value: unknown): PersistedWorkspace {
+  if (value === undefined || value === null) return emptyWorkspace();
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Saved workspace data is corrupted.');
+  const candidate = value as Record<string, unknown>;
+  if (!Array.isArray(candidate.files) || !Array.isArray(candidate.commands) ||
+      (candidate.operations !== undefined && !Array.isArray(candidate.operations)) ||
+      (candidate.editor !== undefined && (!candidate.editor || typeof candidate.editor !== 'object' ||
+        typeof (candidate.editor as Record<string, unknown>).sql !== 'string' ||
+        !(candidate.editor as Record<string, unknown>).selection ||
+        typeof ((candidate.editor as Record<string, unknown>).selection as Record<string, unknown>).start !== 'number' ||
+        typeof ((candidate.editor as Record<string, unknown>).selection as Record<string, unknown>).end !== 'number')) ||
+      (candidate.builder !== undefined && !isBuilderState(candidate.builder))) {
+    throw new Error('Saved workspace data is corrupted. Clear it or import a valid backup.');
+  }
+  if (!candidate.files.every(isPersistedFile)) {
+    throw new Error('Saved workspace contains a corrupted file entry. Clear it or import a valid backup.');
+  }
+  for (const command of candidate.commands) {
+    if (!command || typeof command !== 'object' || typeof command.sql !== 'string' ||
+        (command.tableName !== undefined && typeof command.tableName !== 'string')) {
+      throw new Error('Saved workspace contains a corrupted SQL command. Clear it or import a valid backup.');
+    }
+  }
+  if (candidate.operations && !candidate.operations.every(isPersistedOperation)) {
+    throw new Error('Saved workspace contains a corrupted operation log. Clear it or import a valid backup.');
+  }
+  return value as PersistedWorkspace;
+}
+
+let metadataSaveQueue: Promise<void> = Promise.resolve();
+
+async function saveWorkspaceMetadata(patch: Pick<PersistedWorkspace, 'editor' | 'builder'>): Promise<void> {
+  const save = metadataSaveQueue.then(async () => {
+    const workspace = await loadWorkspace();
+    Object.assign(workspace, structuredClone(patch));
+    await saveWorkspace(workspace);
+  });
+  metadataSaveQueue = save.catch(() => undefined);
+  await save;
+}
+
+export async function saveEditorState(editor: PersistedEditorState): Promise<void> {
+  await saveWorkspaceMetadata({ editor });
+}
+
+export async function saveBuilderState(builder: VisualQueryState): Promise<void> {
+  await saveWorkspaceMetadata({ builder });
 }
 
 export async function saveWorkspace(workspace: PersistedWorkspace): Promise<void> {
@@ -71,6 +196,44 @@ export async function saveWorkspace(workspace: PersistedWorkspace): Promise<void
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
+}
+
+export function getWorkspaceOperations(workspace: PersistedWorkspace): PersistedWorkspaceOperation[] {
+  if (workspace.operations) return structuredClone(workspace.operations);
+  return [
+    ...workspace.files.map((file): PersistedWorkspaceOperation => ({ type: 'file', file, legacy: true })),
+    ...workspace.commands.map((command): PersistedWorkspaceOperation => ({
+      type: 'sql',
+      statements: [command.sql],
+      legacy: true,
+      ...(command.tableName ? { tableName: command.tableName } : {}),
+    })),
+  ];
+}
+
+export async function appendWorkspaceOperation(operation: PersistedWorkspaceOperation): Promise<void> {
+  const workspace = await loadWorkspace();
+  workspace.operations = getWorkspaceOperations(workspace);
+  workspace.operations.push(structuredClone(operation));
+  await saveWorkspace(workspace);
+}
+
+export async function replayWorkspaceOperations(
+  operations: PersistedWorkspaceOperation[],
+  restoreFile: (file: PersistedWorkspaceFile) => Promise<void>,
+  executeSql: (sql: string) => Promise<void>,
+  shouldReplay: (operation: PersistedWorkspaceOperation) => Promise<boolean> = async () => true
+): Promise<void> {
+  for (const operation of operations) {
+    if (!(await shouldReplay(operation))) continue;
+    if (operation.type === 'file') {
+      await restoreFile(operation.file);
+      continue;
+    }
+    for (const statement of operation.statements) {
+      await executeSql(statement);
+    }
+  }
 }
 
 export async function clearWorkspace(): Promise<void> {

@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import { DebugState, ExecutionPlan, OperationType, Schema, DataRow } from '../types';
-import { isCreateTableStatement, recordQueryExecution } from '../debugger/executionRecorder';
+import { recordQueryExecution } from '../debugger/executionRecorder';
+import { isMutatingStatement } from '../database/sqlMutation';
 import { getIntrospectedSchema, seedMoviesDataset } from '../database/schema';
 import { addHistoryItem } from '../storage/historyStore';
+import { diagnoseSqlError, SqlDiagnostic } from '../editor/sqlDiagnostics';
 
 export const DEFAULT_QUERY = `SELECT
     m.title,
@@ -17,7 +19,9 @@ LIMIT 5;`;
 
 export interface WorkspaceStore {
   sql: string;
+  lastExecutionMode: 'query' | 'selection' | null;
   schema: Schema | null;
+  queryError: SqlDiagnostic | null;
   debugState: DebugState;
   executionPlan: ExecutionPlan | null;
   stages: OperationType[];
@@ -29,7 +33,7 @@ export interface WorkspaceStore {
 
   setSql: (sql: string) => void;
   loadSchema: () => Promise<void>;
-  runQuery: () => Promise<void>;
+  runQuery: (sqlOverride?: string, sourceStart?: { line: number; column: number }) => Promise<void>;
   stepForward: () => void;
   stepBack: () => void;
   restartDebug: () => void;
@@ -39,7 +43,9 @@ export interface WorkspaceStore {
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   sql: DEFAULT_QUERY,
+  lastExecutionMode: null,
   schema: null,
+  queryError: null,
   debugState: 'idle',
   executionPlan: null,
   stages: [],
@@ -49,7 +55,12 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   selectedRow: null,
   isInspectingRow: false,
 
-  setSql: (sql) => set({ sql }),
+  setSql: (sql) => set((state) => ({
+    sql,
+    queryError: null,
+    lastExecutionMode: null,
+    ...(state.debugState === 'error' ? { debugState: 'idle' as const } : {}),
+  })),
 
   loadSchema: async () => {
     await seedMoviesDataset();
@@ -57,10 +68,21 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set({ schema });
   },
 
-  runQuery: async () => {
-    set({ debugState: 'running' });
+  runQuery: async (sqlOverride, sourceStart) => {
+    const editorSql = get().sql;
+    const sql = sqlOverride?.trim() ? sqlOverride : editorSql;
+    const isSelection = Boolean(sqlOverride?.trim());
+    set({
+      debugState: 'running',
+      queryError: null,
+      lastExecutionMode: isSelection ? 'selection' : 'query',
+      executionPlan: null,
+      stages: [],
+      currentStageIndex: 0,
+      resultRows: [],
+      resultColumns: [],
+    });
     const startTime = performance.now();
-    const sql = get().sql;
     try {
       const plan = await recordQueryExecution(sql);
       const durationMs = performance.now() - startTime;
@@ -72,7 +94,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         resultColumns: plan.columns,
         debugState: 'paused',
       });
-      if (isCreateTableStatement(sql)) {
+      if (isMutatingStatement(sql)) {
         await get().loadSchema();
       }
       await addHistoryItem({
@@ -83,17 +105,32 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         rowCount: plan.finalResult.length,
         status: 'success',
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       const durationMs = performance.now() - startTime;
-      set({ debugState: 'error' });
+      const diagnostic = diagnoseSqlError(err, sql);
+      if (sourceStart && diagnostic.line) {
+        diagnostic.line += sourceStart.line - 1;
+        if (diagnostic.column && diagnostic.line === sourceStart.line) {
+          diagnostic.column += sourceStart.column - 1;
+        }
+      }
+      set({
+        debugState: 'error',
+        queryError: diagnostic,
+        executionPlan: null,
+        stages: [],
+        currentStageIndex: 0,
+        resultRows: [],
+        resultColumns: [],
+      });
       await addHistoryItem({
         id: `h-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        sql: get().sql,
+        sql,
         timestamp: Date.now(),
         durationMs,
         rowCount: 0,
         status: 'error',
-        errorMessage: err?.message || 'Query execution error',
+        errorMessage: diagnostic.technicalMessage,
       });
     }
   },

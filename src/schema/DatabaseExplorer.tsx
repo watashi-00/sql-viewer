@@ -9,11 +9,14 @@ import { QueryHistoryItem, SavedSnippet } from '../types';
 export const DatabaseExplorer: React.FC = () => {
   const { schema, loadSchema, setSql } = useWorkspaceStore();
   const [activeTab, setActiveTab] = useState<'tables' | 'history'>('tables');
+  const [schemaError, setSchemaError] = useState('');
   const [history, setHistory] = useState<QueryHistoryItem[]>([]);
   const [snippets, setSnippets] = useState<SavedSnippet[]>([]);
 
   useEffect(() => {
-    loadSchema();
+    Promise.resolve(loadSchema()).then(() => setSchemaError('')).catch((error) => {
+      setSchemaError(error instanceof Error ? error.message : String(error));
+    });
   }, [loadSchema]);
 
   const loadHistoryData = async () => {
@@ -85,7 +88,15 @@ export const DatabaseExplorer: React.FC = () => {
         {activeTab === 'tables' ? (
           <div className="p-2 text-xs">
             {!schema ? (
-              <div className="text-muted p-2">Loading database schema...</div>
+              schemaError ? (
+                <div role="alert" className="m-2 rounded border border-error/40 bg-error/10 p-2 text-error">
+                  <p className="font-semibold">Could not restore the local workspace.</p>
+                  <p className="mt-1 break-words">{schemaError}</p>
+                  <p className="mt-2 text-secondary">Use Workspace to clear local data or import a valid backup.</p>
+                </div>
+              ) : (
+                <div className="text-muted p-2">Loading database schema...</div>
+              )
             ) : (
               <div className="space-y-3">
                 <div className="text-muted font-mono uppercase tracking-wider text-[10px]">

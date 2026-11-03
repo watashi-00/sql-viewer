@@ -88,7 +88,7 @@ export const ExecutionVisualizer: React.FC = () => {
             <SkipForward size={14} />
           </button>
           <button
-            onClick={runQuery}
+            onClick={() => void runQuery()}
             className="flex items-center gap-1 px-2.5 py-1 rounded bg-accent text-base font-semibold hover:bg-accent/90"
             title="Run Query (F5)"
           >
