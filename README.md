@@ -1,11 +1,11 @@
 # SQL IDE + Query Debugger + Relational Execution Visualizer
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-watashi--00.github.io%2Fsql--viewer-7C9CFF?style=for-the-badge&logo=github)](https://watashi-00.github.io/sql-viewer/)
-[![Build & Test](https://img.shields.io/github/actions/workflow/status/watashi-00/sql-viewer/deploy.yml?branch=master&style=for-the-badge&label=Build%20%26%20Deploy)](https://github.com/watashi-00/sql-viewer/actions)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-web--tollings.github.io%2Fsql--viewer-7C9CFF?style=for-the-badge&logo=github)](https://web-tollings.github.io/sql-viewer/)
+[![Build & Test](https://img.shields.io/github/actions/workflow/status/web-tollings/sql-viewer/deploy.yml?branch=master&style=for-the-badge&label=Build%20%26%20Deploy)](https://github.com/web-tollings/sql-viewer/actions)
 
 An in-browser SQL IDE, step-by-step query execution debugger, and relational operator visualizer powered by **DuckDB-WASM** and **React 18**.
 
-**Live Application:** [https://watashi-00.github.io/sql-viewer/](https://watashi-00.github.io/sql-viewer/)
+**Live Application:** [https://web-tollings.github.io/sql-viewer/](https://web-tollings.github.io/sql-viewer/)
 
 ---
 
@@ -35,6 +35,7 @@ Users can step through query execution using a deterministic state machine, insp
 - **State Machine**: Supports `idle`, `running`, `paused`, `stepping`, `completed`, and `error` states.
 - **Step Controls**: `Restart`, `Step Back`, `Step Forward`, and `Run` execution timeline navigation.
 - **Stage Nodes**: Visual pipeline graph showing row throughput and execution time (`durationMs`) per stage.
+- **Shareable Query Links**: Copy a URL that restores the SQL and selected debugger stage. Links use the data already available in the receiving browser; imported tables are not embedded.
 
 ### 4. Specialized Relational Operator Visualizers
 - **JOIN Tuple Matching (`<JoinVisualizer />`)**:
@@ -131,7 +132,7 @@ reviews (
 
 ### Installation
 ```bash
-git clone https://github.com/watashi-00/sql-viewer.git
+git clone https://github.com/web-tollings/sql-viewer.git
 cd sql-viewer
 npm install
 ```
@@ -155,7 +156,7 @@ npm run build
 
 ## CI/CD Deployment
 
-Automatic build and deployment to GitHub Pages is configured via `.github/workflows/deploy.yml`. Pushes or merges to `master` automatically compile the application and update the live site at `https://watashi-00.github.io/sql-viewer/`.
+Automatic build and deployment to GitHub Pages is configured via `.github/workflows/deploy.yml`. Pushes or merges to `master` automatically compile the application and update the live site at `https://web-tollings.github.io/sql-viewer/`.
 
 Pull requests and pushes to `master` also run the validation workflow in `.github/workflows/ci.yml`, which installs dependencies, runs the full test suite, and builds the application.
 

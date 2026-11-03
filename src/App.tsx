@@ -1,21 +1,55 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DatabaseExplorer } from './schema/DatabaseExplorer';
 import { SqlEditor } from './editor/SqlEditor';
 import { VisualQueryBuilder } from './builder/VisualQueryBuilder';
 import { ExecutionVisualizer } from './visualizer/ExecutionVisualizer';
 import { ResultGrid } from './inspector/ResultGrid';
-import { Play, RotateCcw, Layers, Palette } from 'lucide-react';
+import { Play, RotateCcw, Layers, Palette, Share2, Check } from 'lucide-react';
 import { useWorkspaceStore } from './state/useWorkspaceStore';
 import { applyTheme, getInitialTheme, AppTheme } from './theme';
+import { createShareableUrl, readShareableState } from './sharing/shareableQuery';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'editor' | 'builder'>('editor');
   const [theme, setTheme] = useState<AppTheme>(getInitialTheme);
-  const { schema, setSql, runQuery, restartDebug } = useWorkspaceStore();
+  const [shareCopied, setShareCopied] = useState(false);
+  const sharedStateApplied = useRef(false);
+  const { schema, setSql, runQuery, restartDebug, jumpToStage, sql, currentStageIndex } = useWorkspaceStore();
 
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    const sharedState = readShareableState();
+    if (!schema || !sharedState || sharedStateApplied.current) return;
+
+    sharedStateApplied.current = true;
+    setSql(sharedState.sql);
+    void runQuery().then(() => jumpToStage(sharedState.stage));
+  }, [schema, setSql, runQuery, jumpToStage]);
+
+  const shareQuery = async () => {
+    const url = createShareableUrl(sql, currentStageIndex);
+    window.history.replaceState(null, '', url);
+
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 1800);
+    } catch {
+      const input = document.createElement('textarea');
+      input.value = url;
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 1800);
+    }
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -53,6 +87,14 @@ export const App: React.FC = () => {
               <option value="ocean">Ocean</option>
             </select>
           </label>
+          <button
+            onClick={() => void shareQuery()}
+            title="Copy a link with this SQL query and debugger stage"
+            className="flex items-center gap-1 px-2 py-1 rounded border border-border text-secondary hover:text-primary"
+          >
+            {shareCopied ? <Check size={12} /> : <Share2 size={12} />}
+            <span>{shareCopied ? 'Link copied' : 'Share'}</span>
+          </button>
           <button
             onClick={restartDebug}
             className="flex items-center gap-1 px-2.5 py-1 rounded bg-surface-secondary border border-border text-secondary hover:text-primary"
