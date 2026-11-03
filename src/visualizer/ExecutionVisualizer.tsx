@@ -9,17 +9,11 @@ import { SubqueryVisualizer } from './SubqueryVisualizer';
 import { ExplainTreeVisualizer } from './ExplainTreeVisualizer';
 import { Play, SkipBack, SkipForward, RotateCcw, CheckCircle2, ArrowRight } from 'lucide-react';
 
-export type DebuggerDockPosition = 'right' | 'bottom';
-
 export interface ExecutionVisualizerProps {
-  dockPosition?: DebuggerDockPosition;
-  onDockPositionChange?: (position: DebuggerDockPosition) => void;
   onClose?: () => void;
 }
 
 export const ExecutionVisualizer: React.FC<ExecutionVisualizerProps> = ({
-  dockPosition = 'right',
-  onDockPositionChange,
   onClose,
 }) => {
   const [viewMode, setViewMode] = useState<'relational' | 'explain'>('relational');
@@ -86,28 +80,6 @@ export const ExecutionVisualizer: React.FC<ExecutionVisualizerProps> = ({
         </div>
 
         <div className="flex items-center gap-1">
-          {onDockPositionChange && (
-            <div role="group" aria-label="SQL debugger position" className="mr-1 flex items-center rounded border border-border bg-surface-secondary p-0.5">
-              <button
-                type="button"
-                aria-pressed={dockPosition === 'right'}
-                onClick={() => onDockPositionChange('right')}
-                title="Dock SQL Debugger to the right"
-                className={`rounded px-1.5 py-1 text-[10px] transition-colors ${dockPosition === 'right' ? 'bg-accent/20 text-accent' : 'text-muted hover:text-primary'}`}
-              >
-                Right
-              </button>
-              <button
-                type="button"
-                aria-pressed={dockPosition === 'bottom'}
-                onClick={() => onDockPositionChange('bottom')}
-                title="Dock SQL Debugger below the editor"
-                className={`rounded px-1.5 py-1 text-[10px] transition-colors ${dockPosition === 'bottom' ? 'bg-accent/20 text-accent' : 'text-muted hover:text-primary'}`}
-              >
-                Bottom
-              </button>
-            </div>
-          )}
           <button
             onClick={restartDebug}
             disabled={!executionPlan}
@@ -134,7 +106,7 @@ export const ExecutionVisualizer: React.FC<ExecutionVisualizerProps> = ({
           </button>
           <button
             onClick={() => void runQuery()}
-            className="flex items-center gap-1 px-2.5 py-1 rounded bg-accent text-base font-semibold hover:bg-accent/90"
+            className="flex items-center gap-1 rounded bg-accent px-2 py-1 text-[10px] font-semibold hover:bg-accent/90"
             title="Run Query (F5)"
           >
             <Play size={12} fill="currentColor" />

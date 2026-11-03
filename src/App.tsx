@@ -11,17 +11,13 @@ import { createShareableUrl, readShareableState } from './sharing/shareableQuery
 import { WorkspaceControls } from './storage/WorkspaceControls';
 import { ResizeHandle } from './components/ResizeHandle';
 
-type DebuggerDockPosition = 'right' | 'bottom';
-
 interface PanelLayout {
   databaseOpen: boolean;
   editorOpen: boolean;
   debuggerOpen: boolean;
   resultsOpen: boolean;
-  debuggerDock: DebuggerDockPosition;
   databaseWidth: number;
   debuggerRightWidth: number;
-  debuggerBottomHeight: number;
   resultsHeight: number;
 }
 
@@ -32,10 +28,8 @@ const defaultPanelLayout: PanelLayout = {
   editorOpen: true,
   debuggerOpen: true,
   resultsOpen: true,
-  debuggerDock: 'right',
   databaseWidth: 256,
   debuggerRightWidth: 48,
-  debuggerBottomHeight: 42,
   resultsHeight: 34,
 };
 
@@ -51,10 +45,8 @@ const readPanelLayout = (): PanelLayout => {
       editorOpen: typeof parsed.editorOpen === 'boolean' ? parsed.editorOpen : defaultPanelLayout.editorOpen,
       debuggerOpen: typeof parsed.debuggerOpen === 'boolean' ? parsed.debuggerOpen : defaultPanelLayout.debuggerOpen,
       resultsOpen: typeof parsed.resultsOpen === 'boolean' ? parsed.resultsOpen : defaultPanelLayout.resultsOpen,
-      debuggerDock: parsed.debuggerDock === 'bottom' ? 'bottom' : 'right',
       databaseWidth: typeof parsed.databaseWidth === 'number' ? clamp(parsed.databaseWidth, 180, 440) : defaultPanelLayout.databaseWidth,
       debuggerRightWidth: typeof parsed.debuggerRightWidth === 'number' ? clamp(parsed.debuggerRightWidth, 28, 72) : defaultPanelLayout.debuggerRightWidth,
-      debuggerBottomHeight: typeof parsed.debuggerBottomHeight === 'number' ? clamp(parsed.debuggerBottomHeight, 22, 72) : defaultPanelLayout.debuggerBottomHeight,
       resultsHeight: typeof parsed.resultsHeight === 'number' ? clamp(parsed.resultsHeight, 18, 70) : defaultPanelLayout.resultsHeight,
     };
   } catch {
@@ -172,14 +164,6 @@ export const App: React.FC = () => {
     }));
   };
 
-  const resizeBottomDebugger = (delta: number) => {
-    const height = contentRegionRef.current?.getBoundingClientRect().height ?? 1;
-    setPanelLayout((layout) => ({
-      ...layout,
-      debuggerBottomHeight: clamp(layout.debuggerBottomHeight - (delta / height) * 100, 22, 72),
-    }));
-  };
-
   const resizeResults = (delta: number) => {
     const height = workspaceAreaRef.current?.getBoundingClientRect().height ?? 1;
     setPanelLayout((layout) => ({
@@ -190,7 +174,6 @@ export const App: React.FC = () => {
 
   const hasEditorOrDebugger = panelLayout.editorOpen || panelLayout.debuggerOpen;
   const hasWorkspacePanels = hasEditorOrDebugger || panelLayout.resultsOpen;
-  const rightDock = panelLayout.debuggerDock === 'right';
   const showDockSplitter = panelLayout.editorOpen && panelLayout.debuggerOpen;
 
   return (
@@ -238,7 +221,7 @@ export const App: React.FC = () => {
           <button
             type="button"
             onClick={() => void runQuery()}
-            className="flex items-center gap-1.5 px-3 py-1 rounded bg-accent text-base font-semibold hover:bg-accent/90"
+            className="flex items-center gap-1.5 rounded bg-accent px-2.5 py-1 text-[11px] font-semibold hover:bg-accent/90"
           >
             <Play size={12} fill="currentColor" />
             <span>Run Query (F5)</span>
@@ -277,15 +260,15 @@ export const App: React.FC = () => {
           {hasEditorOrDebugger && (
             <div
               ref={contentRegionRef}
-              className={`flex min-h-0 min-w-0 overflow-hidden ${rightDock ? 'flex-1 flex-row' : 'flex-1 flex-col'}`}
+              className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden"
               style={panelLayout.resultsOpen ? { flexBasis: `${100 - panelLayout.resultsHeight}%` } : undefined}
             >
               {panelLayout.editorOpen && (
                 <section
-                  className={`flex min-h-0 min-w-0 overflow-hidden ${rightDock ? 'h-full' : 'w-full flex-1 flex-col'}`}
-                  style={rightDock && panelLayout.debuggerOpen
+                  className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden"
+                  style={panelLayout.debuggerOpen
                     ? { flex: `1 1 ${100 - panelLayout.debuggerRightWidth}%` }
-                    : undefined}
+                    : { flex: '1 1 0%' }}
                 >
                   <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
                     <div className="flex h-9 shrink-0 items-center justify-between border-b border-border bg-surface-secondary px-3 text-xs">
@@ -337,27 +320,23 @@ export const App: React.FC = () => {
 
               {showDockSplitter && (
                 <ResizeHandle
-                  orientation={rightDock ? 'vertical' : 'horizontal'}
+                  orientation="vertical"
                   label="Resize SQL Debugger panel"
-                  value={rightDock ? panelLayout.debuggerRightWidth : panelLayout.debuggerBottomHeight}
-                  min={rightDock ? 28 : 22}
-                  max={rightDock ? 72 : 72}
-                  onResize={rightDock ? resizeRightDebugger : resizeBottomDebugger}
+                  value={panelLayout.debuggerRightWidth}
+                  min={28}
+                  max={72}
+                  onResize={resizeRightDebugger}
                 />
               )}
 
               {panelLayout.debuggerOpen && (
                 <section
-                  className={`min-h-0 min-w-0 overflow-hidden ${rightDock ? 'h-full' : 'w-full'}`}
-                  style={rightDock && panelLayout.editorOpen
+                  className="h-full min-h-0 min-w-0 overflow-hidden"
+                  style={panelLayout.editorOpen
                     ? { flex: `0 0 ${panelLayout.debuggerRightWidth}%` }
-                    : !rightDock && panelLayout.editorOpen
-                    ? { flex: `0 0 ${panelLayout.debuggerBottomHeight}%` }
                     : { flex: '1 1 auto' }}
                 >
                   <ExecutionVisualizer
-                    dockPosition={panelLayout.debuggerDock}
-                    onDockPositionChange={(debuggerDock) => setPanelLayout((layout) => ({ ...layout, debuggerDock }))}
                     onClose={() => togglePanel('debuggerOpen')}
                   />
                 </section>
