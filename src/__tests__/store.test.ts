@@ -20,6 +20,7 @@ ORDER BY average_score DESC
 LIMIT 5;`,
       schema: null,
       queryError: null,
+      lastExecutionMode: null,
       debugState: 'idle',
       executionPlan: null,
       stages: [],
@@ -237,6 +238,40 @@ LIMIT 5;`,
     useWorkspaceStore.getState().setSql('SELECT 2');
     expect(useWorkspaceStore.getState().queryError).toBeNull();
     expect(useWorkspaceStore.getState().debugState).toBe('idle');
+  });
+
+  it('runs selected SQL without replacing the editor contents and records selection mode', async () => {
+    const selectedSql = 'SELECT movie_id FROM movies';
+    const plan: ExecutionPlan = {
+      query: selectedSql,
+      stages: ['FROM', 'SELECT'],
+      events: [],
+      finalResult: [{ movie_id: 1 }],
+      columns: ['movie_id'],
+    };
+    const recordSpy = vi.spyOn(recorderModule, 'recordQueryExecution').mockResolvedValue(plan);
+    const historySpy = vi.spyOn(historyStoreModule, 'addHistoryItem').mockResolvedValue(undefined);
+    const editorSql = 'SELECT 1;\nSELECT movie_id FROM movies;';
+    useWorkspaceStore.getState().setSql(editorSql);
+
+    await useWorkspaceStore.getState().runQuery(selectedSql, { line: 2, column: 1 });
+
+    expect(recordSpy).toHaveBeenCalledWith(selectedSql);
+    expect(useWorkspaceStore.getState().sql).toBe(editorSql);
+    expect(useWorkspaceStore.getState().lastExecutionMode).toBe('selection');
+    expect(historySpy).toHaveBeenCalledWith(expect.objectContaining({ sql: selectedSql, status: 'success' }));
+  });
+
+  it('maps selected-query error locations back to editor coordinates', async () => {
+    const parserError = new SyntaxError('Expected a column name');
+    Object.assign(parserError, { location: { start: { line: 1, column: 4 } } });
+    vi.spyOn(recorderModule, 'recordQueryExecution').mockRejectedValue(parserError);
+    vi.spyOn(historyStoreModule, 'addHistoryItem').mockResolvedValue(undefined);
+
+    await useWorkspaceStore.getState().runQuery('SELECT FROM movies', { line: 5, column: 4 });
+
+    expect(useWorkspaceStore.getState().queryError).toMatchObject({ line: 5, column: 7 });
+    expect(useWorkspaceStore.getState().lastExecutionMode).toBe('selection');
   });
 
   it('should automatically record executed queries into historyStore on runQuery success', async () => {

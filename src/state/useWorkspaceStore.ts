@@ -19,6 +19,7 @@ LIMIT 5;`;
 
 export interface WorkspaceStore {
   sql: string;
+  lastExecutionMode: 'query' | 'selection' | null;
   schema: Schema | null;
   queryError: SqlDiagnostic | null;
   debugState: DebugState;
@@ -32,7 +33,7 @@ export interface WorkspaceStore {
 
   setSql: (sql: string) => void;
   loadSchema: () => Promise<void>;
-  runQuery: () => Promise<void>;
+  runQuery: (sqlOverride?: string, sourceStart?: { line: number; column: number }) => Promise<void>;
   stepForward: () => void;
   stepBack: () => void;
   restartDebug: () => void;
@@ -42,6 +43,7 @@ export interface WorkspaceStore {
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   sql: DEFAULT_QUERY,
+  lastExecutionMode: null,
   schema: null,
   queryError: null,
   debugState: 'idle',
@@ -56,6 +58,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   setSql: (sql) => set((state) => ({
     sql,
     queryError: null,
+    lastExecutionMode: null,
     ...(state.debugState === 'error' ? { debugState: 'idle' as const } : {}),
   })),
 
@@ -65,10 +68,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set({ schema });
   },
 
-  runQuery: async () => {
+  runQuery: async (sqlOverride, sourceStart) => {
+    const editorSql = get().sql;
+    const sql = sqlOverride?.trim() ? sqlOverride : editorSql;
+    const isSelection = Boolean(sqlOverride?.trim());
     set({
       debugState: 'running',
       queryError: null,
+      lastExecutionMode: isSelection ? 'selection' : 'query',
       executionPlan: null,
       stages: [],
       currentStageIndex: 0,
@@ -76,7 +83,6 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       resultColumns: [],
     });
     const startTime = performance.now();
-    const sql = get().sql;
     try {
       const plan = await recordQueryExecution(sql);
       const durationMs = performance.now() - startTime;
@@ -102,6 +108,12 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     } catch (err: unknown) {
       const durationMs = performance.now() - startTime;
       const diagnostic = diagnoseSqlError(err, sql);
+      if (sourceStart && diagnostic.line) {
+        diagnostic.line += sourceStart.line - 1;
+        if (diagnostic.column && diagnostic.line === sourceStart.line) {
+          diagnostic.column += sourceStart.column - 1;
+        }
+      }
       set({
         debugState: 'error',
         queryError: diagnostic,

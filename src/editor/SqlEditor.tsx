@@ -94,7 +94,7 @@ export interface SqlEditorProps {
 }
 
 export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
-  const { sql, setSql, runQuery, queryError } = useWorkspaceStore();
+  const { sql, setSql, runQuery, queryError, lastExecutionMode } = useWorkspaceStore();
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const monacoTheme =
@@ -123,7 +123,9 @@ export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
     <div className="h-full w-full flex flex-col bg-surface border-b border-border">
       <div className="flex items-center justify-between px-3 py-1.5 bg-surface-secondary border-b border-border text-xs text-secondary font-mono">
         <span>SQL EDITOR</span>
-        <span className="text-muted">Press F5 or click Run to execute</span>
+        <span className={lastExecutionMode === 'selection' ? 'text-accent' : 'text-muted'}>
+          {lastExecutionMode === 'selection' ? 'Selected SQL executed' : 'Ctrl+Enter runs selection · F5 runs query'}
+        </span>
       </div>
       {queryError && (
         <div role="alert" className="max-h-32 shrink-0 overflow-y-auto border-b border-error/30 bg-error/5 px-3 py-2 text-xs">
@@ -180,8 +182,26 @@ export const SqlEditor: React.FC<SqlEditorProps> = ({ theme = 'midnight' }) => {
               monaco.editor.setModelMarkers(editor.getModel(), DIAGNOSTIC_MARKER_OWNER, createMonacoMarkers(queryError));
             }
 
+            if (monaco?.KeyMod?.CtrlCmd !== undefined && monaco?.KeyCode?.Enter !== undefined) {
+              editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+                const selection = editor.getSelection?.();
+                const model = editor.getModel?.();
+                const selectedSql = selection && !selection.isEmpty?.()
+                  ? model?.getValueInRange?.(selection)
+                  : undefined;
+                if (!selection || !selectedSql?.trim()) {
+                  void runQuery();
+                  return;
+                }
+                void runQuery(selectedSql, {
+                  line: selection.startLineNumber,
+                  column: selection.startColumn,
+                });
+              });
+            }
+
             editor.addCommand(monaco.KeyCode.F5, () => {
-              runQuery();
+              void runQuery();
             });
 
             if (!completionProviderRegistered && monaco?.languages?.registerCompletionItemProvider) {

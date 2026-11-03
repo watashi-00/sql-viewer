@@ -105,7 +105,7 @@ export const App: React.FC = () => {
             <span>Restart</span>
           </button>
           <button
-            onClick={runQuery}
+            onClick={() => void runQuery()}
             className="flex items-center gap-1.5 px-3 py-1 rounded bg-accent text-base font-semibold hover:bg-accent/90"
           >
             <Play size={12} fill="currentColor" />

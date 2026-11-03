@@ -250,7 +250,8 @@ describe('IntelliSense Autocomplete Provider', () => {
       });
 
       expect(container.textContent).toContain('SQL EDITOR');
-      expect(container.textContent).toContain('Press F5 or click Run to execute');
+      expect(container.textContent).toContain('Ctrl+Enter runs selection');
+      expect(container.textContent).toContain('F5 runs query');
 
       const editorEl = container.querySelector('[data-testid="mock-monaco-editor"]');
       expect(editorEl).not.toBeNull();
