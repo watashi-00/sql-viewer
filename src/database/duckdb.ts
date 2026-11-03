@@ -2,16 +2,11 @@ import * as duckdb from '@duckdb/duckdb-wasm';
 import type { DuckDBBindings, DuckDBConnection as DuckDBBlockingConnection } from '@duckdb/duckdb-wasm/blocking';
 import duckdb_wasm from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url';
 import eh_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url';
-import { Schema, TableMeta, ColumnMeta, DataRow, RowValue, CustomFileImport } from '../types';
-import {
-  loadWorkspace,
-  saveWorkspace,
-  getWorkspaceOperations,
-  replayWorkspaceOperations,
-  PersistedWorkspace,
-  PersistedWorkspaceOperation,
-} from '../storage/workspaceStore';
-import { getSqlMutation, SqlMutationJournal } from './sqlMutation';
+import { Schema, DataRow, RowValue, CustomFileImport } from '../types';
+import type { PersistedWorkspaceFile } from '../storage/workspaceStore';
+import { WorkspacePersistence } from './workspacePersistence';
+import { importWorkspaceFile } from './fileImport';
+import { inspectDatabaseSchema } from './schemaIntrospection';
 
 export type DuckDBInstance = duckdb.AsyncDuckDB | DuckDBBindings;
 export type DuckDBConnection = duckdb.AsyncDuckDBConnection | DuckDBBlockingConnection;
@@ -19,10 +14,6 @@ export type DuckDBConnection = duckdb.AsyncDuckDBConnection | DuckDBBlockingConn
 let db: DuckDBInstance | null = null;
 let conn: DuckDBConnection | null = null;
 let initPromise: Promise<{ db: DuckDBInstance; conn: DuckDBConnection }> | null = null;
-let workspaceRestored = false;
-let workspaceStateLoaded = false;
-let persistedWorkspace: PersistedWorkspace = { files: [], commands: [] };
-const mutationJournal = new SqlMutationJournal();
 
 const isNodeEnvironment =
   typeof window === 'undefined' ||
@@ -93,117 +84,20 @@ export async function getDuckDB(): Promise<{ db: DuckDBInstance; conn: DuckDBCon
 
 export const initDuckDB = getDuckDB;
 
-async function ensurePersistedWorkspaceLoaded(): Promise<void> {
-  if (workspaceStateLoaded || isNodeEnvironment) return;
-  persistedWorkspace = await loadWorkspace();
-  workspaceStateLoaded = true;
+export function restoreWorkspace(): Promise<void> {
+  return workspacePersistence.restore();
 }
 
-async function tableExists(tableName: string): Promise<boolean> {
-  const escapedTableName = tableName.replace(/'/g, "''");
-  const result = await executeQuery(`
-    SELECT COUNT(*) AS count
-    FROM information_schema.tables
-    WHERE table_schema = 'main' AND table_name = '${escapedTableName}'
-  `);
-  return Number(result.rows[0]?.count ?? 0) > 0;
+export function persistWorkspaceFile(file: PersistedWorkspaceFile): Promise<void> {
+  return workspacePersistence.persistFile(file);
 }
 
-export async function restoreWorkspace(): Promise<void> {
-  if (isNodeEnvironment || workspaceRestored) return;
-  await ensurePersistedWorkspaceLoaded();
-
-  if (persistedWorkspace.operations) {
-    await replayWorkspaceOperations(
-      getWorkspaceOperations(persistedWorkspace),
-      async (file) => {
-        await registerAndLoadFile(file.fileName, file.buffer, file.format, false);
-      },
-      async (sql) => {
-        await executeQuery(sql);
-      },
-      async (operation) => {
-        if (!operation.legacy) return true;
-        if (operation.type === 'file') return !(await tableExists(operation.file.tableName));
-        return !operation.tableName || !(await tableExists(operation.tableName));
-      }
-    );
-  } else {
-    // Preserve the legacy restore behavior for workspaces written before ordered operations existed.
-    for (const file of persistedWorkspace.files) {
-      if (!(await tableExists(file.tableName))) {
-        await registerAndLoadFile(file.fileName, file.buffer, file.format, false);
-      }
-    }
-
-    for (const command of persistedWorkspace.commands) {
-      if (!command.tableName || !(await tableExists(command.tableName))) {
-        await executeQuery(command.sql);
-      }
-    }
-  }
-
-  workspaceRestored = true;
+export function persistWorkspaceCommand(sql: string): Promise<void> {
+  return workspacePersistence.persistCommand(sql);
 }
 
-export async function persistWorkspaceFile(file: {
-  fileName: string;
-  tableName: string;
-  format: 'csv' | 'json' | 'parquet';
-  buffer: Uint8Array;
-}): Promise<void> {
-  if (isNodeEnvironment) return;
-  await ensurePersistedWorkspaceLoaded();
-  await appendPersistedOperation({ type: 'file', file });
-  persistedWorkspace.files = [
-    ...persistedWorkspace.files.filter((item) => item.tableName !== file.tableName),
-    file,
-  ];
-  persistedWorkspace.commands = persistedWorkspace.commands.filter(
-    (command) => command.tableName !== file.tableName
-  );
-  await saveWorkspace(persistedWorkspace);
-}
-
-export async function persistWorkspaceCommand(sql: string): Promise<void> {
-  if (isNodeEnvironment) return;
-  await ensurePersistedWorkspaceLoaded();
-  const tableName = getSqlMutation(sql)?.tableName;
-  if (mutationJournal.inTransaction) {
-    await persistMutationSql(sql);
-    return;
-  }
-  persistedWorkspace.operations = getWorkspaceOperations(persistedWorkspace);
-  if (tableName) {
-    persistedWorkspace.files = persistedWorkspace.files.filter((file) => file.tableName !== tableName);
-  }
-  persistedWorkspace.commands = [
-    ...persistedWorkspace.commands.filter((command) => command.tableName !== tableName),
-    { sql, tableName },
-  ];
-  await persistMutationSql(sql, tableName);
-}
-
-export async function persistWorkspaceMutation(sql: string): Promise<void> {
-  if (isNodeEnvironment) return;
-  await ensurePersistedWorkspaceLoaded();
-  await persistMutationSql(sql);
-}
-
-async function appendPersistedOperation(operation: PersistedWorkspaceOperation): Promise<void> {
-  persistedWorkspace.operations = getWorkspaceOperations(persistedWorkspace);
-  persistedWorkspace.operations.push(operation);
-  await saveWorkspace(persistedWorkspace);
-}
-
-async function persistMutationSql(sql: string, tableName?: string): Promise<void> {
-  await mutationJournal.record(sql, async (operation) => {
-    await appendPersistedOperation({
-      type: 'sql',
-      statements: operation.statements,
-      ...(tableName ?? operation.tableName ? { tableName: tableName ?? operation.tableName } : {}),
-    });
-  });
+export function persistWorkspaceMutation(sql: string): Promise<void> {
+  return workspacePersistence.persistMutation(sql);
 }
 
 export async function executeQuery(sql: string): Promise<{ rows: DataRow[]; columns: string[] }> {
@@ -244,112 +138,31 @@ export async function resetDatabase(): Promise<void> {
     db = null;
   }
   initPromise = null;
-  workspaceRestored = false;
-  workspaceStateLoaded = false;
-  persistedWorkspace = { files: [], commands: [] };
-  mutationJournal.reset();
+  workspacePersistence.reset();
   await getDuckDB();
 }
 
-export async function fetchSchema(): Promise<Schema> {
-  const tablesRes = await executeQuery(`
-    SELECT table_name, table_schema
-    FROM information_schema.tables
-    WHERE table_schema = 'main' OR table_schema = 'public'
-    ORDER BY table_name
-  `);
-
-  const tables: TableMeta[] = [];
-  for (const row of tablesRes.rows) {
-    const tableName = String(row.table_name);
-    const tableSchema = String(row.table_schema ?? 'main');
-    const escapedTableLiteral = tableName.replace(/'/g, "''");
-    const escapedSchemaLiteral = tableSchema.replace(/'/g, "''");
-    const escapedTableIdentifier = tableName.replace(/"/g, '""');
-    const escapedSchemaIdentifier = tableSchema.replace(/"/g, '""');
-
-    const colsRes = await executeQuery(`
-      SELECT column_name, data_type, is_nullable
-      FROM information_schema.columns
-      WHERE table_name = '${escapedTableLiteral}' AND table_schema = '${escapedSchemaLiteral}'
-      ORDER BY ordinal_position
-    `);
-
-    let rowCount: number | undefined = undefined;
-    try {
-      const countRes = await executeQuery(
-        `SELECT COUNT(*) as count FROM "${escapedSchemaIdentifier}"."${escapedTableIdentifier}"`
-      );
-      if (countRes.rows[0]?.count !== undefined) {
-        rowCount = Number(countRes.rows[0].count);
-      }
-    } catch {
-      // Ignore count error
-    }
-
-    const columns: ColumnMeta[] = colsRes.rows.map((c) => ({
-      name: String(c.column_name),
-      type: String(c.data_type),
-      isNullable: c.is_nullable === 'YES',
-    }));
-
-    tables.push({
-      name: tableName,
-      schema: tableSchema,
-      columns,
-      rowCount,
-    });
-  }
-
-  return {
-    name: 'main',
-    tables,
-  };
+export function fetchSchema(): Promise<Schema> {
+  return inspectDatabaseSchema(executeQuery);
 }
 
-export async function registerAndLoadFile(
+export function registerAndLoadFile(
   fileName: string,
   buffer: Uint8Array,
   format: 'csv' | 'json' | 'parquet',
   persist = true
 ): Promise<CustomFileImport> {
-  const { db } = await getDuckDB();
-
-  const sanitized = fileName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_');
-  const tableName = sanitized || 'custom_table';
-  const escapedTableName = tableName.replace(/"/g, '""');
-  const escapedFileName = fileName.replace(/'/g, "''");
-  const fileSize = buffer.byteLength;
-  const databaseBuffer = buffer.slice();
-
-  await db.registerFileBuffer(fileName, databaseBuffer);
-
-  let readFn = 'read_csv_auto';
-  if (format === 'json') {
-    readFn = 'read_json_auto';
-  } else if (format === 'parquet') {
-    readFn = 'read_parquet';
-  }
-
-  await executeQuery(`CREATE OR REPLACE TABLE "${escapedTableName}" AS SELECT * FROM ${readFn}('${escapedFileName}')`);
-
-  const schema = await fetchSchema();
-  const tableMeta = schema.tables.find((t) => t.name === tableName);
-
-  const columns = tableMeta ? tableMeta.columns : [];
-  const rowCount = tableMeta?.rowCount ?? 0;
-
-  if (persist) {
-    await persistWorkspaceFile({ fileName, tableName, format, buffer });
-  }
-
-  return {
-    tableName,
+  return importWorkspaceFile(
+    { getDuckDB, executeQuery, fetchSchema, persistWorkspaceFile },
     fileName,
-    fileSize,
+    buffer,
     format,
-    rowCount,
-    columns,
-  };
+    persist
+  );
 }
 
+const workspacePersistence = new WorkspacePersistence({
+  isNodeEnvironment,
+  executeQuery,
+  registerAndLoadFile,
+});
